@@ -1,31 +1,57 @@
-use sha2::digest::generic_array::{typenum::U32, GenericArray};
-use sha2::{Digest, Sha256};
+use crate::key::Key;
+
+#[derive(Debug, Clone)]
+struct KBucket {
+    nodes: Vec<Key>,
+}
+
+impl KBucket {
+    fn new() -> Self {
+        Self { nodes: Vec::new() }
+    }
+}
 
 #[derive(Clone, Debug)]
-pub struct Key(GenericArray<u8, U32>);
+struct RoutingTable {
+    local_key: Key,
+    kbuckets: Vec<KBucket>,
+}
 
-impl Key {
-    pub fn generate() -> Self {
-        let mut hasher = Sha256::new();
-        hasher.update(b"hello world");
+impl RoutingTable {
+    fn new(key: Key) -> Self {
+        Self {
+            kbuckets: (0..256).map(|_| KBucket::new()).collect(),
+            local_key: key,
+        }
+    }
 
-        Self(hasher.finalize())
+    fn insert_node(&mut self, target: Key) {
+        let d = &self.local_key.distance(&target);
+        let bucket_idx = d.diff_bits();
+
+        if let Some(i) = bucket_idx {
+            let bucket = &mut self.kbuckets[i as usize];
+            bucket.nodes.push(target);
+        } else {
+            eprintln!("SelfEntry");
+        }
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct KademliaNode {
-    pub id: Key,
+    routing_table: RoutingTable,
 }
 
-// construct_uint! {
-//     /// 256-bit unsigned integer.
-//     pub(super) struct U256(4);
-// }
-
 impl KademliaNode {
-    pub fn new() -> Self {
-        let key = Key::generate();
-        Self { id: key }
+    pub fn new(key: Key) -> Self {
+        Self {
+            routing_table: RoutingTable::new(key),
+        }
+    }
+
+    pub fn add_address(&mut self, target: KademliaNode) {
+        self.routing_table
+            .insert_node(target.routing_table.local_key);
     }
 }

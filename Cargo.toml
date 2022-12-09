@@ -5,3 +5,5 @@ edition = "2021"
 
 [dependencies]
 sha2 = "0.10.6"
+uint = "0.9.5"
+rand = "0.8.5"
