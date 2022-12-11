@@ -38,7 +38,7 @@ impl Key {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Distance(pub(super) U256);
 
 impl Distance {
