@@ -1,7 +1,9 @@
+use multiaddr::multiaddr;
 use std::io;
 
 mod key;
 mod node;
+mod transport;
 
 use key::Key;
 use node::KademliaNode;
@@ -9,22 +11,27 @@ use node::KademliaNode;
 pub const K_VALUE: usize = 4;
 
 fn main() -> io::Result<()> {
+    let addr = multiaddr!(Ip4([127, 0, 0, 1]), Tcp(10500u16));
     let key = Key::random();
-    // println!("{}", key.distance(&key2).diff_bits().unwrap());
 
-    let mut node = KademliaNode::new(key);
-    let mut nodes = Vec::new();
+    let mut node = KademliaNode::new(key, addr)?;
+    // let mut nodes = Vec::new();
 
-    for _ in 0..20 {
-        let key = Key::random();
+    // for _ in 0..20 {
+    //     let addr = multiaddr!(Ip4([127, 0, 0, 1]), Tcp(10500u16));
+    //     let key = Key::random();
 
-        let mut new_node = KademliaNode::new(key);
-        new_node.add_address(node.local_key());
-        node.add_address(new_node.local_key());
-        nodes.push(new_node);
-    }
+    //     let mut new_node = KademliaNode::new(key, addr)?;
+    //     new_node.add_address(node.local_key());
+    //     node.add_address(new_node.local_key());
+    //     nodes.push(new_node);
+    // }
 
-    node.find_nodes(nodes[5].local_key());
+    // let keys = node.find_nodes(nodes[5].local_key());
+
+    // for k in keys.iter() {
+    //     println!("{:?} {k:?}", node.local_key().distance(&k));
+    // }
 
     Ok(())
 }

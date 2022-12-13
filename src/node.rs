@@ -1,6 +1,9 @@
-use crate::{key::Key, K_VALUE};
+use multiaddr::Multiaddr;
+use std::io;
 
-#[derive(Debug, Clone)]
+use crate::{key::Key, transport::Transport, K_VALUE};
+
+#[derive(Debug)]
 struct KBucket {
     nodes: Vec<Key>,
 }
@@ -11,7 +14,7 @@ impl KBucket {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 struct RoutingTable {
     local_key: Key,
     kbuckets: Vec<KBucket>,
@@ -47,7 +50,6 @@ impl RoutingTable {
                     break;
                 }
 
-                println!("{i}");
                 let bucket = &mut self.kbuckets[i as usize];
                 closest.append(&mut bucket.nodes);
 
@@ -59,20 +61,27 @@ impl RoutingTable {
 
         closest.sort_by(|a, b| self.local_key.distance(a).cmp(&self.local_key.distance(b)));
 
-        closest[..K_VALUE].to_vec()
+        if closest.len() > K_VALUE {
+            return closest[..K_VALUE].to_vec();
+        }
+
+        closest
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct KademliaNode {
     routing_table: RoutingTable,
 }
 
 impl KademliaNode {
-    pub fn new(key: Key) -> Self {
-        Self {
+    pub fn new(key: Key, addr: Multiaddr) -> io::Result<Self> {
+        let transport = Transport {};
+        transport.listen_on(addr).unwrap();
+
+        Ok(Self {
             routing_table: RoutingTable::new(key),
-        }
+        })
     }
 
     pub fn local_key(&self) -> &Key {
@@ -83,7 +92,7 @@ impl KademliaNode {
         self.routing_table.insert_node(target);
     }
 
-    pub fn find_nodes(&mut self, target: &Key) {
-        println!("{:?}", self.routing_table.closest_keys(target));
+    pub fn find_nodes(&mut self, target: &Key) -> Vec<Key> {
+        self.routing_table.closest_keys(target)
     }
 }
