@@ -10,17 +10,23 @@ use node::KademliaNode;
 
 pub const K_VALUE: usize = 4;
 
-fn main() -> io::Result<()> {
+#[tokio::main]
+async fn main() -> io::Result<()> {
     let addr = multiaddr!(Ip4([127, 0, 0, 1]), Tcp(10500u16));
     let key = Key::random();
+    let key2 = Key::random();
 
-    let mut node = KademliaNode::new(key, addr)?;
+    let mut node = KademliaNode::new(key, addr).await?;
+    node.add_address(&key2);
+
+    // let nodes = node.find_nodes(&key2);
+    // println!("{nodes:?}");
+
+    loop {}
     // let mut nodes = Vec::new();
-
     // for _ in 0..20 {
     //     let addr = multiaddr!(Ip4([127, 0, 0, 1]), Tcp(10500u16));
     //     let key = Key::random();
-
     //     let mut new_node = KademliaNode::new(key, addr)?;
     //     new_node.add_address(node.local_key());
     //     node.add_address(new_node.local_key());
@@ -32,6 +38,7 @@ fn main() -> io::Result<()> {
     // for k in keys.iter() {
     //     println!("{:?} {k:?}", node.local_key().distance(&k));
     // }
+
 
     Ok(())
 }

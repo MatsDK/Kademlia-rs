@@ -1,3 +1,4 @@
+use futures::StreamExt;
 use multiaddr::Multiaddr;
 use std::io;
 
@@ -75,9 +76,9 @@ pub struct KademliaNode {
 }
 
 impl KademliaNode {
-    pub fn new(key: Key, addr: Multiaddr) -> io::Result<Self> {
-        let transport = Transport {};
-        transport.listen_on(addr).unwrap();
+    pub async fn new(key: Key, addr: Multiaddr) -> io::Result<Self> {
+        let mut transport = Transport::default();
+        transport.listen_on(addr).await.unwrap();
 
         Ok(Self {
             routing_table: RoutingTable::new(key),

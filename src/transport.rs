@@ -1,31 +1,64 @@
+use futures::{Stream, StreamExt, stream::FusedStream};
 use multiaddr::{Multiaddr, Protocol};
 use socket2::{Domain, Socket, Type};
 use std::{
-    error::Error,
     io,
-    net::{SocketAddr, TcpListener},
+    net::SocketAddr, pin::Pin, task::{Context, Poll},
 };
+use tokio::net::{TcpListener, TcpStream};
 
-pub struct Transport {}
+pub struct Transport {
+    listener: Option<Pin<Box<TcpListenStream>>>
+}
+
+impl Default for Transport {
+    fn default() -> Self {
+        Self {
+            listener: None
+        }
+    }
+}
 
 impl Transport {
-    pub fn listen_on(&self, addr: Multiaddr) -> Result<(), String> {
+    pub async fn listen_on(&mut self, addr: Multiaddr) -> Result<(), String> {
         let socket_addr = if let Ok(sa) = multiaddr_to_socketaddr(addr.clone()) {
             sa
         } else {
             return Err("Multiaddr not supported".to_string());
         };
 
-        let socket = self.create_socket(&socket_addr).unwrap();
-        socket.bind(&socket_addr.into()).unwrap();
-        socket.set_nonblocking(true).unwrap();
+        let listener = TcpListener::bind(&socket_addr).await.unwrap();
 
-        let listener: TcpListener = socket.into();
-        let local_addr = listener.local_addr().unwrap();
-
+        let listen_stream = TcpListenStream { listener };
+        self.spawn_listener(listen_stream);
+        
         println!("Listen on {addr}");
-        println!("Listen on local {local_addr}");
+        println!("Listen on {socket_addr}");
+        // println!("Listen on local {local_addr}");
+
+        // loop {}
+
         Ok(())
+    }
+
+    fn spawn_listener(&self, mut listener: TcpListenStream) {
+        tokio::spawn(async move {
+            while let Ok(stream) = listener.select_next_some().await {
+                // let test  = future::ok::<TcpStream, io::Error>(stream);
+                // match Box::pin(test).await {
+                //     Ok(s) => {
+
+                //         s
+
+                //     }
+                //     Err(e) => {
+                //         eprintln!("{e}")
+                //     }
+
+                // }
+                println!("got incoming stream")
+            }
+        });
     }
 
     fn create_socket(&self, socket_addr: &SocketAddr) -> io::Result<Socket> {
@@ -42,6 +75,37 @@ impl Transport {
         socket.set_nodelay(true)?;
 
         Ok(socket)
+    }
+}
+
+struct TcpListenStream {
+    listener: TcpListener
+}
+
+impl Stream for TcpListenStream {
+    type Item = Result<TcpStream, io::Error>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match self.listener.poll_accept(cx) {
+            Poll::Ready(Ok((mut stream, socket_addr))) => {
+                // println!("got a connection: {socket_addr}");
+
+                return Poll::Ready(Some(Ok(stream)))
+            }
+            Poll::Ready(Err(e)) => {
+                println!("Error {e}");
+                return Poll::Ready(None)
+            }
+            Poll::Pending => {
+                return Poll::Pending
+            }
+        };
+    }
+}
+
+impl FusedStream for TcpListenStream {
+    fn is_terminated(&self) -> bool {
+        false
     }
 }
 
