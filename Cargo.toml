@@ -3,6 +3,14 @@ name = "kademlia-rs"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "node1"
+path = "src/main.rs"
+
+[[bin]]
+name = "node2"
+path = "src/main2.rs"
+
 [dependencies]
 sha2 = "0.10.6"
 uint = "0.9.5"

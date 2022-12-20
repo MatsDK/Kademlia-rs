@@ -1,20 +1,23 @@
-use futures::{Stream, StreamExt, stream::FusedStream};
+use futures::{stream::FusedStream, Stream, StreamExt};
 use multiaddr::{Multiaddr, Protocol};
 use socket2::{Domain, Socket, Type};
 use std::{
     io,
-    net::SocketAddr, pin::Pin, task::{Context, Poll},
+    net::{self, SocketAddr},
+    pin::Pin,
+    task::{Context, Poll},
 };
 use tokio::net::{TcpListener, TcpStream};
 
+#[derive(Debug)]
 pub struct Transport {
-    listener: Option<Pin<Box<TcpListenStream>>>
+    // listener: Option<Pin<Box<TcpListenStream>>>
 }
 
 impl Default for Transport {
     fn default() -> Self {
         Self {
-            listener: None
+            // listener: None
         }
     }
 }
@@ -31,7 +34,7 @@ impl Transport {
 
         let listen_stream = TcpListenStream { listener };
         self.spawn_listener(listen_stream);
-        
+
         println!("Listen on {addr}");
         println!("Listen on {socket_addr}");
         // println!("Listen on local {local_addr}");
@@ -61,6 +64,38 @@ impl Transport {
         });
     }
 
+    // type Output = ();
+    // type Error = io::Error;
+    // type Dial = Pin<Box<dyn Future<Output = Result<Self::Output, Self::Error>> + Send>>;
+
+    pub async fn dial(&self, addr: Multiaddr) -> Result<TcpStream, String> {
+        let socket_addr = if let Ok(sa) = multiaddr_to_socketaddr(addr.clone()) {
+            sa
+        } else {
+            return Err("Invalid socket address".to_string());
+        };
+
+        println!("{socket_addr}");
+        let socket = self.create_socket(&socket_addr).unwrap();
+        // socket.set_nonblocking(true).unwrap();
+
+        match socket.connect(&socket_addr.into()) {
+            Ok(()) => {}
+            Err(err) => return Err(err.to_string()),
+        }
+
+        let s: net::TcpStream = socket.into();
+        let stream = tokio::net::TcpStream::try_from(s).unwrap();
+
+        stream.writable().await.unwrap();
+
+        if let Some(e) = stream.take_error().unwrap() {
+            return Err(e.to_string());
+        }
+
+        Ok(stream)
+    }
+
     fn create_socket(&self, socket_addr: &SocketAddr) -> io::Result<Socket> {
         let domain = if socket_addr.is_ipv4() {
             Domain::IPV4
@@ -78,8 +113,9 @@ impl Transport {
     }
 }
 
+#[derive(Debug)]
 struct TcpListenStream {
-    listener: TcpListener
+    listener: TcpListener,
 }
 
 impl Stream for TcpListenStream {
@@ -90,15 +126,13 @@ impl Stream for TcpListenStream {
             Poll::Ready(Ok((mut stream, socket_addr))) => {
                 // println!("got a connection: {socket_addr}");
 
-                return Poll::Ready(Some(Ok(stream)))
+                return Poll::Ready(Some(Ok(stream)));
             }
             Poll::Ready(Err(e)) => {
                 println!("Error {e}");
-                return Poll::Ready(None)
+                return Poll::Ready(None);
             }
-            Poll::Pending => {
-                return Poll::Pending
-            }
+            Poll::Pending => return Poll::Pending,
         };
     }
 }

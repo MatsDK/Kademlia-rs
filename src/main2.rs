@@ -1,4 +1,4 @@
-use multiaddr::{multiaddr, Multiaddr};
+use multiaddr::Multiaddr;
 use std::io;
 
 mod key;
@@ -12,15 +12,12 @@ pub const K_VALUE: usize = 4;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    let addr = "/ip4/127.0.0.1/tcp/10500".parse::<Multiaddr>().unwrap();
-    let addr2 = "/ip4/127.0.0.1/tcp/10501".parse::<Multiaddr>().unwrap();
+    let addr = "/ip4/127.0.0.1/tcp/10501".parse::<Multiaddr>().unwrap();
     let key = Key::random();
-    let key2 = Key::random();
 
-    let mut node = KademliaNode::new(key, addr).await?;
-    node.add_address(&key2);
+    let _node = KademliaNode::new(key, addr).await?;
 
-    node.dial(addr2).await?;
+    // node.dial("127.0.0.1:10501".parse::<Multiaddr>().unwrap()).await?;
 
     // let nodes = node.find_nodes(&key2);
     // println!("{nodes:?}");

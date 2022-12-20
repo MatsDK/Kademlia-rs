@@ -73,16 +73,25 @@ impl RoutingTable {
 #[derive(Debug)]
 pub struct KademliaNode {
     routing_table: RoutingTable,
+    transport: Transport,
 }
 
 impl KademliaNode {
-    pub async fn new(key: Key, addr: Multiaddr) -> io::Result<Self> {
+    pub async fn new(key: Key, addr: impl Into<Multiaddr>) -> io::Result<Self> {
         let mut transport = Transport::default();
-        transport.listen_on(addr).await.unwrap();
+        transport.listen_on(addr.into()).await.unwrap();
 
         Ok(Self {
             routing_table: RoutingTable::new(key),
+            transport,
         })
+    }
+
+    pub async fn dial(&self, addr: impl Into<Multiaddr>) -> io::Result<()> {
+        let addr = addr.into();
+        self.transport.dial(addr).await.unwrap();
+
+        Ok(())
     }
 
     pub fn local_key(&self) -> &Key {
