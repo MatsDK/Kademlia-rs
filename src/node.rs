@@ -1,6 +1,6 @@
-use futures::StreamExt;
+use futures::{stream::FusedStream, Stream, StreamExt};
 use multiaddr::Multiaddr;
-use std::io;
+use std::{io, task::Poll, thread, time::Duration};
 
 use crate::{key::Key, transport::Transport, K_VALUE};
 
@@ -78,8 +78,18 @@ pub struct KademliaNode {
 
 impl KademliaNode {
     pub async fn new(key: Key, addr: impl Into<Multiaddr>) -> io::Result<Self> {
-        let mut transport = Transport::default();
-        transport.listen_on(addr.into()).await.unwrap();
+        let addr = addr.into();
+        let mut transport = Transport::new(addr.clone()).await.unwrap();
+        let addr2 = "/ip4/127.0.0.1/tcp/10501".parse::<Multiaddr>().unwrap();
+
+        if addr2 != addr {
+            transport.dial(addr2).await.unwrap();
+        }
+
+        loop {
+            let _ev = transport.select_next_some().await;
+            println!("done cycle");
+        }
 
         Ok(Self {
             routing_table: RoutingTable::new(key),

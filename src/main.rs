@@ -1,3 +1,4 @@
+use futures::StreamExt;
 use multiaddr::{multiaddr, Multiaddr};
 use std::io;
 
@@ -25,7 +26,10 @@ async fn main() -> io::Result<()> {
     // let nodes = node.find_nodes(&key2);
     // println!("{nodes:?}");
 
-    loop {}
+    loop {
+        // let _ev = node.select_next_some().await;
+        // println!("Trigger");
+    }
     // let mut nodes = Vec::new();
     // for _ in 0..20 {
     //     let addr = multiaddr!(Ip4([127, 0, 0, 1]), Tcp(10500u16));
