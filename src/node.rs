@@ -1,8 +1,19 @@
 use futures::{stream::FusedStream, Stream, StreamExt};
 use multiaddr::Multiaddr;
-use std::{io, task::Poll, thread, time::Duration};
+use std::{
+    io,
+    pin::Pin,
+    task::{Context, Poll},
+    thread,
+    time::Duration,
+};
 
-use crate::{key::Key, transport::Transport, K_VALUE};
+use crate::{
+    key::Key,
+    pool::Pool,
+    transport::{Transport, TransportEvent},
+    K_VALUE,
+};
 
 #[derive(Debug)]
 struct KBucket {
@@ -74,26 +85,18 @@ impl RoutingTable {
 pub struct KademliaNode {
     routing_table: RoutingTable,
     transport: Transport,
+    pool: Pool,
 }
 
 impl KademliaNode {
     pub async fn new(key: Key, addr: impl Into<Multiaddr>) -> io::Result<Self> {
         let addr = addr.into();
-        let mut transport = Transport::new(addr.clone()).await.unwrap();
-        let addr2 = "/ip4/127.0.0.1/tcp/10501".parse::<Multiaddr>().unwrap();
-
-        if addr2 != addr {
-            transport.dial(addr2).await.unwrap();
-        }
-
-        loop {
-            let _ev = transport.select_next_some().await;
-            println!("done cycle");
-        }
+        let transport = Transport::new(addr.clone()).await.unwrap();
 
         Ok(Self {
             routing_table: RoutingTable::new(key),
             transport,
+            pool: Pool::new(),
         })
     }
 
@@ -114,5 +117,48 @@ impl KademliaNode {
 
     pub fn find_nodes(&mut self, target: &Key) -> Vec<Key> {
         self.routing_table.closest_keys(target)
+    }
+
+    fn handle_transport_event(&mut self, ev: TransportEvent) {
+        match ev {
+            TransportEvent::Incoming {
+                stream,
+                socket_addr,
+            } => {
+                let local_addr = stream.local_addr().unwrap();
+                self.pool.add_incoming(stream, socket_addr, local_addr);
+            }
+            TransportEvent::Error(e) => {
+                println!("Got error {e}");
+            }
+        }
+    }
+
+    fn poll_next_event(&mut self, cx: &mut Context<'_>) -> Poll<()> {
+        loop {
+            match self.transport.poll(cx) {
+                Poll::Pending => {}
+                Poll::Ready(transport_ev) => {
+                    self.handle_transport_event(transport_ev);
+                    return Poll::Ready(());
+                }
+            }
+
+            return Poll::Pending;
+        }
+    }
+}
+
+impl Stream for KademliaNode {
+    type Item = ();
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.poll_next_event(cx).map(Some)
+    }
+}
+
+impl FusedStream for KademliaNode {
+    fn is_terminated(&self) -> bool {
+        false
     }
 }

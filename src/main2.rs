@@ -1,8 +1,10 @@
+use futures::StreamExt;
 use multiaddr::Multiaddr;
 use std::io;
 
 mod key;
 mod node;
+mod pool;
 mod transport;
 
 use key::Key;
@@ -15,14 +17,16 @@ async fn main() -> io::Result<()> {
     let addr = "/ip4/127.0.0.1/tcp/10501".parse::<Multiaddr>().unwrap();
     let key = Key::random();
 
-    let _node = KademliaNode::new(key, addr).await?;
+    let mut node = KademliaNode::new(key, addr).await?;
 
     // node.dial("127.0.0.1:10501".parse::<Multiaddr>().unwrap()).await?;
 
     // let nodes = node.find_nodes(&key2);
     // println!("{nodes:?}");
 
-    loop {}
+    loop {
+        let _ev = node.select_next_some().await;
+    }
     // let mut nodes = Vec::new();
     // for _ in 0..20 {
     //     let addr = multiaddr!(Ip4([127, 0, 0, 1]), Tcp(10500u16));

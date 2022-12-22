@@ -4,6 +4,7 @@ use std::io;
 
 mod key;
 mod node;
+mod pool;
 mod transport;
 
 use key::Key;
@@ -27,8 +28,7 @@ async fn main() -> io::Result<()> {
     // println!("{nodes:?}");
 
     loop {
-        // let _ev = node.select_next_some().await;
-        // println!("Trigger");
+        let _ev = node.select_next_some().await;
     }
     // let mut nodes = Vec::new();
     // for _ in 0..20 {

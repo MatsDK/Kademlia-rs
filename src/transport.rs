@@ -33,32 +33,6 @@ impl Transport {
         Ok(Self { listener })
     }
 
-    fn poll_next_event(&mut self, cx: &mut Context<'_>) -> Poll<()> {
-        loop {
-            match self.listener.poll_accept(cx) {
-                Poll::Pending => {}
-                Poll::Ready(tcp_listener_ev) => {
-                    // EXTRACT
-                    match tcp_listener_ev {
-                        TcpListenerEvent::Incoming {
-                            stream,
-                            socket_addr,
-                        } => {
-                            println!("Incoming stream {socket_addr}");
-                        }
-                        TcpListenerEvent::Error(e) => {
-                            println!("Got error in tcp listener {e}");
-                        }
-                    }
-
-                    return Poll::Ready(());
-                }
-            }
-
-            return Poll::Pending;
-        }
-    }
-
     pub async fn dial(&self, addr: Multiaddr) -> Result<TcpStream, String> {
         let socket_addr = if let Ok(sa) = multiaddr_to_socketaddr(addr.clone()) {
             sa
@@ -101,22 +75,22 @@ impl Transport {
 
         Ok(socket)
     }
-}
-impl Stream for Transport {
-    type Item = ();
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.poll_next_event(cx).map(Some)
+    pub fn poll(&mut self, cx: &mut Context<'_>) -> Poll<TransportEvent> {
+        loop {
+            match self.listener.poll_accept(cx) {
+                Poll::Pending => {}
+                Poll::Ready(tcp_listener_ev) => {
+                    return Poll::Ready(tcp_listener_ev);
+                }
+            }
+
+            return Poll::Pending;
+        }
     }
 }
 
-impl FusedStream for Transport {
-    fn is_terminated(&self) -> bool {
-        false
-    }
-}
-
-pub enum TcpListenerEvent {
+pub enum TransportEvent {
     Incoming {
         stream: TcpStream,
         socket_addr: SocketAddr,
@@ -131,44 +105,20 @@ struct TcpListenStream {
 }
 
 impl TcpListenStream {
-    fn poll_accept(&self, cx: &mut Context<'_>) -> Poll<TcpListenerEvent> {
+    fn poll_accept(&self, cx: &mut Context<'_>) -> Poll<TransportEvent> {
         let (stream, socket_addr) = match self.listener.poll_accept(cx) {
             Poll::Pending => return Poll::Pending,
-            Poll::Ready(Err(e)) => return Poll::Ready(TcpListenerEvent::Error(e)),
+            Poll::Ready(Err(e)) => return Poll::Ready(TransportEvent::Error(e)),
             Poll::Ready(Ok(s)) => s,
         };
 
-        Poll::Ready(TcpListenerEvent::Incoming {
+        // println!("Local addr on incoming {:?}", stream.local_addr());
+        Poll::Ready(TransportEvent::Incoming {
             stream,
             socket_addr,
         })
     }
 }
-
-// impl Stream for TcpListenStream {
-//     type Item = Result<TcpStream, io::Error>;
-
-//     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-//         match self.listener.poll_accept(cx) {
-//             Poll::Ready(Ok((mut stream, socket_addr))) => {
-//                 println!("got a connection: {socket_addr}");
-
-//                 return Poll::Ready(Some(Ok(stream)));
-//             }
-//             Poll::Ready(Err(e)) => {
-//                 println!("Error {e}");
-//                 return Poll::Ready(None);
-//             }
-//             Poll::Pending => return Poll::Pending,
-//         };
-//     }
-// }
-
-// impl FusedStream for TcpListenStream {
-//     fn is_terminated(&self) -> bool {
-//         false
-//     }
-// }
 
 fn multiaddr_to_socketaddr(mut addr: Multiaddr) -> Result<SocketAddr, ()> {
     // "Pop" the IP address and TCP port from the end of the address,
