@@ -1,13 +1,16 @@
 use core_::borrow::Borrow;
 use rand::Rng;
+use serde::{Deserialize, Serialize};
 use sha2::{
     digest::{generic_array::GenericArray, typenum::U32},
     Digest, Sha256,
 };
 use uint::*;
 
-#[derive(Clone, Debug)]
-pub struct Key(GenericArray<u8, U32>);
+// #[derive(Clone, Debug)]
+// pub struct Key(GenericArray<u8, U32>);
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Key([u8; 32]);
 
 construct_uint! {
     /// 256-bit unsigned integer.
@@ -20,14 +23,14 @@ impl Key {
     where
         T: Borrow<[u8]>,
     {
-        Key(Sha256::digest(value.borrow()))
+        Key(Sha256::digest(value.borrow()).into())
     }
 
     pub fn random() -> Self {
         let id = rand::thread_rng().gen::<[u8; 32]>();
         let bytes = Sha256::digest(id);
 
-        Self(bytes)
+        Self(bytes.into())
     }
 
     pub fn distance(&self, other: &Key) -> Distance {

@@ -1,5 +1,7 @@
+use ::futures::future::ok;
 use futures::{stream::FusedStream, Stream, StreamExt};
 use multiaddr::Multiaddr;
+use serde::{Deserialize, Serialize};
 use std::{
     io,
     pin::Pin,
@@ -7,6 +9,7 @@ use std::{
     thread,
     time::Duration,
 };
+use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 use crate::{
     key::Key,
@@ -102,7 +105,11 @@ impl KademliaNode {
 
     pub async fn dial(&self, addr: impl Into<Multiaddr>) -> io::Result<()> {
         let addr = addr.into();
-        self.transport.dial(addr).await.unwrap();
+        let mut s = self.transport.dial(addr).await.unwrap();
+
+        let ev = KademliaEvent::Ping(self.local_key().clone());
+        let ev = bincode::serialize(&ev).unwrap();
+        s.write_all(&ev).await.unwrap();
 
         Ok(())
     }
@@ -161,4 +168,9 @@ impl FusedStream for KademliaNode {
     fn is_terminated(&self) -> bool {
         false
     }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub enum KademliaEvent {
+    Ping(Key),
 }
