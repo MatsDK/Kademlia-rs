@@ -1,5 +1,4 @@
-use ::futures::future::ok;
-use futures::{stream::FusedStream, Stream, StreamExt};
+use futures::{stream::FusedStream, AsyncWriteExt, Stream, StreamExt};
 use multiaddr::Multiaddr;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -9,11 +8,10 @@ use std::{
     thread,
     time::Duration,
 };
-use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 use crate::{
     key::Key,
-    pool::Pool,
+    pool::{ConnectionEvent, Pool},
     transport::{Transport, TransportEvent},
     K_VALUE,
 };
@@ -45,7 +43,7 @@ impl RoutingTable {
 
     fn insert_node(&mut self, target: &Key) {
         let d = &self.local_key.distance(target);
-        let bucket_idx = d.diff_bits();
+        let bucket_idx = d.ilog2();
 
         if let Some(i) = bucket_idx {
             let bucket = &mut self.kbuckets[i as usize];
@@ -53,13 +51,15 @@ impl RoutingTable {
         } else {
             eprintln!("SelfEntry");
         }
+
+        println!("Updated routing table {:?}", self.kbuckets);
     }
 
     fn closest_keys(&mut self, target: &Key) -> Vec<Key> {
         let d = self.local_key.distance(target);
         let mut closest = Vec::new();
 
-        if let Some(mut i) = d.diff_bits() {
+        if let Some(mut i) = d.ilog2() {
             while closest.len() < K_VALUE {
                 if i == 256 {
                     break;
@@ -132,11 +132,22 @@ impl KademliaNode {
                 stream,
                 socket_addr,
             } => {
-                let local_addr = stream.local_addr().unwrap();
-                self.pool.add_incoming(stream, socket_addr, local_addr);
+                self.pool.add_incoming(stream, socket_addr);
             }
             TransportEvent::Error(e) => {
                 println!("Got error {e}");
+            }
+        }
+    }
+
+    fn handle_connection_event(&mut self, ev: ConnectionEvent) {
+        match ev {
+            ConnectionEvent::ConnectionEstablished { key, remote_addr } => {
+                println!("Established connection {key:?} {remote_addr}");
+                self.add_address(&key);
+            }
+            ConnectionEvent::ConnectionFailed(e) => {
+                println!("Connection failed {e}");
             }
         }
     }
@@ -147,6 +158,14 @@ impl KademliaNode {
                 Poll::Pending => {}
                 Poll::Ready(transport_ev) => {
                     self.handle_transport_event(transport_ev);
+                    return Poll::Ready(());
+                }
+            }
+
+            match self.pool.poll(cx) {
+                Poll::Pending => {}
+                Poll::Ready(connection_ev) => {
+                    self.handle_connection_event(connection_ev);
                     return Poll::Ready(());
                 }
             }

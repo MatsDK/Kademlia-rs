@@ -17,10 +17,10 @@ async fn main() -> io::Result<()> {
     let addr = "/ip4/127.0.0.1/tcp/10500".parse::<Multiaddr>().unwrap();
     let addr2 = "/ip4/127.0.0.1/tcp/10501".parse::<Multiaddr>().unwrap();
     let key = Key::random();
-    let key2 = Key::random();
+    // let key2 = Key::random();
 
     let mut node = KademliaNode::new(key, addr).await?;
-    node.add_address(&key2);
+    // node.add_address(&key2);
 
     node.dial(addr2).await?;
 

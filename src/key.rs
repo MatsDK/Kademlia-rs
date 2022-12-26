@@ -9,7 +9,7 @@ use uint::*;
 
 // #[derive(Clone, Debug)]
 // pub struct Key(GenericArray<u8, U32>);
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Hash)]
 pub struct Key([u8; 32]);
 
 construct_uint! {
@@ -45,7 +45,7 @@ impl Key {
 pub struct Distance(pub(super) U256);
 
 impl Distance {
-    pub fn diff_bits(&self) -> Option<u32> {
+    pub fn ilog2(&self) -> Option<u32> {
         (256 - self.0.leading_zeros()).checked_sub(1)
     }
 }

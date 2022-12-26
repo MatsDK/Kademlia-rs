@@ -1,3 +1,4 @@
+use futures::prelude::*;
 use futures::{stream::FusedStream, Future, FutureExt, Stream, StreamExt, TryStreamExt};
 use multiaddr::{Multiaddr, Protocol};
 use socket2::{Domain, Socket, Type};
@@ -9,7 +10,8 @@ use std::{
     thread,
     time::Duration,
 };
-use tokio::net::{TcpListener, TcpStream};
+use tokio::io::AsyncWriteExt;
+use tokio::net::TcpListener;
 
 #[derive(Debug)]
 pub struct Transport {
@@ -49,7 +51,7 @@ impl Transport {
         }
 
         let s: net::TcpStream = socket.into();
-        let stream = tokio::net::TcpStream::try_from(s).unwrap();
+        let mut stream = tokio::net::TcpStream::try_from(s).unwrap();
 
         stream.writable().await.unwrap();
 
@@ -57,7 +59,7 @@ impl Transport {
             return Err(e.to_string());
         }
 
-        Ok(stream)
+        Ok(TcpStream(stream))
     }
 
     fn create_socket(&self, socket_addr: &SocketAddr) -> io::Result<Socket> {
@@ -90,6 +92,57 @@ impl Transport {
     }
 }
 
+#[derive(Debug)]
+pub struct TcpStream(pub tokio::net::TcpStream);
+
+impl From<TcpStream> for tokio::net::TcpStream {
+    fn from(t: TcpStream) -> tokio::net::TcpStream {
+        t.0
+    }
+}
+
+impl AsyncRead for TcpStream {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context,
+        buf: &mut [u8],
+    ) -> Poll<Result<usize, io::Error>> {
+        let mut read_buf = tokio::io::ReadBuf::new(buf);
+        futures::ready!(tokio::io::AsyncRead::poll_read(
+            Pin::new(&mut self.0),
+            cx,
+            &mut read_buf
+        ))?;
+        Poll::Ready(Ok(read_buf.filled().len()))
+    }
+}
+
+impl AsyncWrite for TcpStream {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context,
+        buf: &[u8],
+    ) -> Poll<Result<usize, io::Error>> {
+        tokio::io::AsyncWrite::poll_write(Pin::new(&mut self.0), cx, buf)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), io::Error>> {
+        tokio::io::AsyncWrite::poll_flush(Pin::new(&mut self.0), cx)
+    }
+
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), io::Error>> {
+        tokio::io::AsyncWrite::poll_shutdown(Pin::new(&mut self.0), cx)
+    }
+
+    fn poll_write_vectored(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        bufs: &[io::IoSlice<'_>],
+    ) -> Poll<io::Result<usize>> {
+        tokio::io::AsyncWrite::poll_write_vectored(Pin::new(&mut self.0), cx, bufs)
+    }
+}
+
 pub enum TransportEvent {
     Incoming {
         stream: TcpStream,
@@ -112,9 +165,8 @@ impl TcpListenStream {
             Poll::Ready(Ok(s)) => s,
         };
 
-        // println!("Local addr on incoming {:?}", stream.local_addr());
         Poll::Ready(TransportEvent::Incoming {
-            stream,
+            stream: TcpStream(stream),
             socket_addr,
         })
     }
