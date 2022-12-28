@@ -1,5 +1,4 @@
 use futures::prelude::*;
-use futures::{stream::FusedStream, Future, FutureExt, Stream, StreamExt, TryStreamExt};
 use multiaddr::{Multiaddr, Protocol};
 use socket2::{Domain, Socket, Type};
 use std::{
@@ -7,10 +6,7 @@ use std::{
     net::{self, SocketAddr},
     pin::Pin,
     task::{Context, Poll},
-    thread,
-    time::Duration,
 };
-use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 
 #[derive(Debug)]
@@ -20,7 +16,6 @@ pub struct Transport {
 
 impl Transport {
     pub async fn new(addr: Multiaddr) -> Result<Self, String> {
-        println!("{addr}");
         let socket_addr = if let Ok(sa) = multiaddr_to_socketaddr(addr.clone()) {
             sa
         } else {
@@ -51,7 +46,7 @@ impl Transport {
         }
 
         let s: net::TcpStream = socket.into();
-        let mut stream = tokio::net::TcpStream::try_from(s).unwrap();
+        let stream = tokio::net::TcpStream::try_from(s).unwrap();
 
         stream.writable().await.unwrap();
 

@@ -1,10 +1,7 @@
-use core_::borrow::Borrow;
+use core_::{borrow::Borrow, fmt};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use sha2::{
-    digest::{generic_array::GenericArray, typenum::U32},
-    Digest, Sha256,
-};
+use sha2::{Digest, Sha256};
 use uint::*;
 
 // #[derive(Clone, Debug)]
@@ -38,6 +35,14 @@ impl Key {
         let b = U256::from(other.0.as_slice());
 
         Distance(a ^ b)
+    }
+}
+
+impl fmt::Display for Key {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // let s = String::from_utf8(self.0.to_vec()).unwrap();
+        let s = bs58::encode(self.0).into_string();
+        write!(f, "{s}")
     }
 }
 

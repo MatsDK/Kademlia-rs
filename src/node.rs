@@ -1,4 +1,4 @@
-use futures::{stream::FusedStream, AsyncWriteExt, Stream, StreamExt};
+use futures::{stream::FusedStream, AsyncWriteExt, Stream};
 use multiaddr::Multiaddr;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -11,7 +11,7 @@ use std::{
 
 use crate::{
     key::Key,
-    pool::{ConnectionEvent, Pool},
+    pool::{ConnectionEvent, Pool, PoolEvent},
     transport::{Transport, TransportEvent},
     K_VALUE,
 };
@@ -52,7 +52,7 @@ impl RoutingTable {
             eprintln!("SelfEntry");
         }
 
-        println!("Updated routing table {:?}", self.kbuckets);
+        // println!("Updated routing table {:?}", self.kbuckets);
     }
 
     fn closest_keys(&mut self, target: &Key) -> Vec<Key> {
@@ -94,6 +94,7 @@ pub struct KademliaNode {
 impl KademliaNode {
     pub async fn new(key: Key, addr: impl Into<Multiaddr>) -> io::Result<Self> {
         let addr = addr.into();
+        println!(">> Listening {addr} >> {key}");
         let transport = Transport::new(addr.clone()).await.unwrap();
 
         Ok(Self {
@@ -107,6 +108,11 @@ impl KademliaNode {
         let addr = addr.into();
         let mut s = self.transport.dial(addr).await.unwrap();
 
+        let ev = KademliaEvent::Ping(self.local_key().clone());
+        let ev = bincode::serialize(&ev).unwrap();
+        s.write_all(&ev).await.unwrap();
+
+        thread::sleep(Duration::from_millis(2000));
         let ev = KademliaEvent::Ping(self.local_key().clone());
         let ev = bincode::serialize(&ev).unwrap();
         s.write_all(&ev).await.unwrap();
@@ -140,14 +146,14 @@ impl KademliaNode {
         }
     }
 
-    fn handle_connection_event(&mut self, ev: ConnectionEvent) {
+    fn handle_pool_event(&mut self, ev: PoolEvent) {
         match ev {
-            ConnectionEvent::ConnectionEstablished { key, remote_addr } => {
-                println!("Established connection {key:?} {remote_addr}");
+            PoolEvent::NewConnection { key, remote_addr } => {
+                println!("Established connection {key} {remote_addr}");
                 self.add_address(&key);
             }
-            ConnectionEvent::ConnectionFailed(e) => {
-                println!("Connection failed {e}");
+            PoolEvent::Request { key, event } => {
+                println!("new request from {key}: {event:?}")
             }
         }
     }
@@ -165,7 +171,7 @@ impl KademliaNode {
             match self.pool.poll(cx) {
                 Poll::Pending => {}
                 Poll::Ready(connection_ev) => {
-                    self.handle_connection_event(connection_ev);
+                    self.handle_pool_event(connection_ev);
                     return Poll::Ready(());
                 }
             }
