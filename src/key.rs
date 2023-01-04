@@ -40,9 +40,7 @@ impl Key {
 
 impl fmt::Display for Key {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // let s = String::from_utf8(self.0.to_vec()).unwrap();
-        let s = bs58::encode(self.0).into_string();
-        write!(f, "{s}")
+        write!(f, "{}", bs58::encode(self.0).into_string())
     }
 }
 

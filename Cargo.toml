@@ -3,14 +3,6 @@ name = "kademlia-rs"
 version = "0.1.0"
 edition = "2021"
 
-[[bin]]
-name = "node1"
-path = "src/main.rs"
-
-[[bin]]
-name = "node2"
-path = "src/main2.rs"
-
 [dependencies]
 sha2 = "0.10.6"
 uint = "0.9.5"
@@ -22,3 +14,4 @@ futures = "0.3.25"
 bincode = "1.3.3"
 serde = { version = "1.0.151", features = ["derive"] }
 bs58 = "0.4.0"
+clap = { version = "4.0.32", features = ["derive"] }

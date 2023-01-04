@@ -15,7 +15,7 @@ pub struct Transport {
 }
 
 impl Transport {
-    pub async fn new(addr: Multiaddr) -> Result<Self, String> {
+    pub async fn new(addr: &Multiaddr) -> Result<Self, String> {
         let socket_addr = if let Ok(sa) = multiaddr_to_socketaddr(addr.clone()) {
             sa
         } else {
@@ -30,7 +30,7 @@ impl Transport {
         Ok(Self { listener })
     }
 
-    pub async fn dial(&self, addr: Multiaddr) -> Result<TcpStream, String> {
+    pub async fn dial(&self, addr: &Multiaddr) -> Result<TcpStream, String> {
         let socket_addr = if let Ok(sa) = multiaddr_to_socketaddr(addr.clone()) {
             sa
         } else {
@@ -167,7 +167,7 @@ impl TcpListenStream {
     }
 }
 
-fn multiaddr_to_socketaddr(mut addr: Multiaddr) -> Result<SocketAddr, ()> {
+pub fn multiaddr_to_socketaddr(mut addr: Multiaddr) -> Result<SocketAddr, ()> {
     // "Pop" the IP address and TCP port from the end of the address,
     // ignoring a `/p2p/...` suffix as well as any prefix of possibly
     // outer protocols, if present.

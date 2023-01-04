@@ -1,88 +1,18 @@
-use futures::{stream::FusedStream, AsyncWriteExt, Stream};
+use futures::{stream::FusedStream, Stream};
 use multiaddr::Multiaddr;
 use serde::{Deserialize, Serialize};
 use std::{
     io,
     pin::Pin,
     task::{Context, Poll},
-    thread,
-    time::Duration,
 };
 
 use crate::{
     key::Key,
-    pool::{ConnectionEvent, Pool, PoolEvent},
+    pool::{Pool, PoolEvent},
+    routing::RoutingTable,
     transport::{Transport, TransportEvent},
-    K_VALUE,
 };
-
-#[derive(Debug)]
-struct KBucket {
-    nodes: Vec<Key>,
-}
-
-impl KBucket {
-    fn new() -> Self {
-        Self { nodes: Vec::new() }
-    }
-}
-
-#[derive(Debug)]
-struct RoutingTable {
-    local_key: Key,
-    kbuckets: Vec<KBucket>,
-}
-
-impl RoutingTable {
-    fn new(key: Key) -> Self {
-        Self {
-            kbuckets: (0..256).map(|_| KBucket::new()).collect(),
-            local_key: key,
-        }
-    }
-
-    fn insert_node(&mut self, target: &Key) {
-        let d = &self.local_key.distance(target);
-        let bucket_idx = d.ilog2();
-
-        if let Some(i) = bucket_idx {
-            let bucket = &mut self.kbuckets[i as usize];
-            bucket.nodes.push(target.clone());
-        } else {
-            eprintln!("SelfEntry");
-        }
-
-        // println!("Updated routing table {:?}", self.kbuckets);
-    }
-
-    fn closest_keys(&mut self, target: &Key) -> Vec<Key> {
-        let d = self.local_key.distance(target);
-        let mut closest = Vec::new();
-
-        if let Some(mut i) = d.ilog2() {
-            while closest.len() < K_VALUE {
-                if i == 256 {
-                    break;
-                }
-
-                let bucket = &mut self.kbuckets[i as usize];
-                closest.append(&mut bucket.nodes);
-
-                i += 1;
-            }
-        } else {
-            eprintln!("SelfEntry");
-        }
-
-        closest.sort_by(|a, b| self.local_key.distance(a).cmp(&self.local_key.distance(b)));
-
-        if closest.len() > K_VALUE {
-            return closest[..K_VALUE].to_vec();
-        }
-
-        closest
-    }
-}
 
 #[derive(Debug)]
 pub struct KademliaNode {
@@ -95,27 +25,20 @@ impl KademliaNode {
     pub async fn new(key: Key, addr: impl Into<Multiaddr>) -> io::Result<Self> {
         let addr = addr.into();
         println!(">> Listening {addr} >> {key}");
-        let transport = Transport::new(addr.clone()).await.unwrap();
+        let transport = Transport::new(&addr).await.unwrap();
 
         Ok(Self {
-            routing_table: RoutingTable::new(key),
+            routing_table: RoutingTable::new(key.clone()),
             transport,
-            pool: Pool::new(),
+            pool: Pool::new(key),
         })
     }
 
-    pub async fn dial(&self, addr: impl Into<Multiaddr>) -> io::Result<()> {
+    pub async fn dial(&mut self, addr: impl Into<Multiaddr>) -> io::Result<()> {
         let addr = addr.into();
-        let mut s = self.transport.dial(addr).await.unwrap();
+        let stream = self.transport.dial(&addr).await.unwrap();
 
-        let ev = KademliaEvent::Ping(self.local_key().clone());
-        let ev = bincode::serialize(&ev).unwrap();
-        s.write_all(&ev).await.unwrap();
-
-        thread::sleep(Duration::from_millis(2000));
-        let ev = KademliaEvent::Ping(self.local_key().clone());
-        let ev = bincode::serialize(&ev).unwrap();
-        s.write_all(&ev).await.unwrap();
+        self.pool.add_outgoing(stream, addr).await;
 
         Ok(())
     }
