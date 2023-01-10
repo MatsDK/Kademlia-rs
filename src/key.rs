@@ -51,4 +51,15 @@ impl Distance {
     pub fn ilog2(&self) -> Option<u32> {
         (256 - self.0.leading_zeros()).checked_sub(1)
     }
+
+    pub fn leading_zeros(&self) -> Option<u32> {
+        let leading_zeros = self.0.leading_zeros();
+
+        // distance should not be 0
+        if leading_zeros == 256 {
+            return None;
+        }
+
+        Some(leading_zeros)
+    }
 }

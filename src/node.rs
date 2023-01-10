@@ -11,7 +11,7 @@ use crate::{
     key::Key,
     pool::{Pool, PoolEvent},
     routing::RoutingTable,
-    transport::{Transport, TransportEvent},
+    transport::{Transport, TransportEvent, socketaddr_to_multiaddr},
 };
 
 #[derive(Debug)]
@@ -47,11 +47,11 @@ impl KademliaNode {
         &self.routing_table.local_key
     }
 
-    pub fn add_address(&mut self, target: &Key) {
-        self.routing_table.insert_node(target);
+    pub fn add_address(&mut self, key: &Key, addr: Multiaddr) {
+        self.routing_table.insert(key, addr);
     }
 
-    pub fn find_nodes(&mut self, target: &Key) -> Vec<Key> {
+    pub fn find_node(&mut self, target: &Key) -> Vec<Key> {
         self.routing_table.closest_keys(target)
     }
 
@@ -73,7 +73,8 @@ impl KademliaNode {
         match ev {
             PoolEvent::NewConnection { key, remote_addr } => {
                 println!("Established connection {key} {remote_addr}");
-                self.add_address(&key);
+                let endpoint = socketaddr_to_multiaddr(&remote_addr);
+                self.add_address(&key, endpoint);
             }
             PoolEvent::Request { key, event } => {
                 println!("new request from {key}: {event:?}")

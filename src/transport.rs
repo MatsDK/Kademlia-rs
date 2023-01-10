@@ -192,3 +192,10 @@ pub fn multiaddr_to_socketaddr(mut addr: Multiaddr) -> Result<SocketAddr, ()> {
     }
     Err(())
 }
+
+/// Turns an IP address and port into the corresponding QUIC multiaddr.
+pub fn socketaddr_to_multiaddr(socket_addr: &SocketAddr) -> Multiaddr {
+    Multiaddr::empty()
+        .with(socket_addr.ip().into())
+        .with(Protocol::Tcp(socket_addr.port()))
+}

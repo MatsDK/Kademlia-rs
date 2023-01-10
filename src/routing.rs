@@ -1,3 +1,6 @@
+use arrayvec::ArrayVec;
+use multiaddr::Multiaddr;
+
 use crate::{
     key::{Distance, Key},
     K_VALUE,
@@ -5,12 +8,16 @@ use crate::{
 
 #[derive(Debug)]
 struct KBucket {
-    nodes: Vec<Key>,
+    nodes: ArrayVec<(Key, Multiaddr), { K_VALUE }>,
 }
 
 impl KBucket {
     fn new() -> Self {
-        Self { nodes: Vec::new() }
+        Self { nodes: ArrayVec::new() }
+    }
+
+    fn get_keys(&self) -> Vec<Key> {
+        self.nodes.iter().map(|(key, _)| key.clone()).collect()
     }
 }
 
@@ -28,37 +35,60 @@ impl RoutingTable {
         }
     }
 
-    pub fn insert_node(&mut self, target: &Key) {
+    pub fn insert(&mut self, target: &Key, addr: Multiaddr) {
         let d = &self.local_key.distance(target);
-        let bucket_idx = d.ilog2();
+        let bucket_idx = BucketIndex::new(&d);
 
         if let Some(i) = bucket_idx {
-            let bucket = &mut self.kbuckets[i as usize];
-            bucket.nodes.push(target.clone());
+            let bucket = &mut self.kbuckets[i.index()];
+
+            // If the bucket is full we should check if there is a disconnected node
+            if bucket.nodes.is_full() {
+                return
+            }
+
+            bucket.nodes.push((target.clone(), addr));
         } else {
             eprintln!("SelfEntry");
         }
     }
 
     pub fn closest_keys(&mut self, target: &Key) -> Vec<Key> {
-        let d = self.local_key.distance(target);
         let mut closest = Vec::new();
 
-        if let Some(mut i) = d.ilog2() {
-            while closest.len() < K_VALUE {
-                if i == 256 {
-                    break;
-                }
+        let d = self.local_key.distance(target);
+        let bucket_idx = BucketIndex::new(&d);
 
-                let bucket = &mut self.kbuckets[i as usize];
-                closest.append(&mut bucket.nodes);
-
-                i += 1;
-            }
-        } else {
+        if bucket_idx.is_none() {
             eprintln!("SelfEntry");
+            return closest;
         }
 
+        let index = bucket_idx.unwrap().index();
+
+        closest.append(&mut self.kbuckets[index].get_keys());
+
+        // Look for the closest on the left if less than K closest found
+        if closest.len() < K_VALUE {
+            for i in (0..index).rev() {
+                closest.append(&mut self.kbuckets[i].get_keys());
+                if closest.len() >= K_VALUE {
+                    break;
+                }
+            }
+        }
+
+        // Now look for the closest on the right if less than K closest found
+        if closest.len() < K_VALUE {
+            for i in (index + 1)..256 {
+                closest.append(&mut self.kbuckets[i].get_keys());
+                if closest.len() >= K_VALUE {
+                    break;
+                }
+            }
+        }
+
+        // Sort by distance to local_key
         closest.sort_by(|a, b| self.local_key.distance(a).cmp(&self.local_key.distance(b)));
 
         if closest.len() > K_VALUE {
@@ -74,7 +104,8 @@ pub struct BucketIndex(usize);
 
 impl BucketIndex {
     fn new(d: &Distance) -> Option<BucketIndex> {
-        d.ilog2().map(|i| BucketIndex(i as usize))
+        d.ilog2().map(|idx| BucketIndex(idx as usize))
+        // d.leading_zeros().map(|idx| BucketIndex(idx as usize))
     }
 
     fn index(&self) -> usize {

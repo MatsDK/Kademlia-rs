@@ -35,16 +35,14 @@ async fn main() -> io::Result<()> {
     let mut node = KademliaNode::new(key, addr).await?;
 
     if let Some(dial) = dial {
-        println!("dial");
         node.dial(dial).await?;
     }
 
-    let key2 = Key::random();
-
     loop {
+        let key2 = Key::random();
         let _ev = node.select_next_some().await;
-        let nodes = node.find_nodes(&key2);
-        println!("{nodes:?}");
+        let nodes = node.find_node(&key2);
+        // println!("{nodes:?}");
     }
     // let mut nodes = Vec::new();
     // for _ in 0..20 {
@@ -62,5 +60,5 @@ async fn main() -> io::Result<()> {
     //     println!("{:?} {k:?}", node.local_key().distance(&k));
     // }
 
-    Ok(())
+    // Ok(())
 }
