@@ -2,6 +2,7 @@ use futures::{stream::FusedStream, Stream};
 use multiaddr::Multiaddr;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::VecDeque,
     io,
     pin::Pin,
     task::{Context, Poll},
@@ -11,7 +12,7 @@ use crate::{
     key::Key,
     pool::{Pool, PoolEvent},
     routing::RoutingTable,
-    transport::{Transport, TransportEvent, socketaddr_to_multiaddr},
+    transport::{socketaddr_to_multiaddr, Transport, TransportEvent},
 };
 
 #[derive(Debug)]
@@ -19,6 +20,7 @@ pub struct KademliaNode {
     routing_table: RoutingTable,
     transport: Transport,
     pool: Pool,
+    queued_queries: VecDeque<Query>,
 }
 
 impl KademliaNode {
@@ -31,6 +33,7 @@ impl KademliaNode {
             routing_table: RoutingTable::new(key.clone()),
             transport,
             pool: Pool::new(key),
+            queued_queries: VecDeque::new(),
         })
     }
 
@@ -51,8 +54,14 @@ impl KademliaNode {
         self.routing_table.insert(key, addr);
     }
 
-    pub fn find_node(&mut self, target: &Key) -> Vec<Key> {
-        self.routing_table.closest_keys(target)
+    pub fn find_node(&mut self, target: &Key) {
+        let peers = self.routing_table.closest_nodes(target);
+        self.queued_queries.push_back(Query::OutboundQuery {
+            peers,
+            event: KademliaEvent::FindNode {
+                target: target.clone(),
+            },
+        });
     }
 
     fn handle_transport_event(&mut self, ev: TransportEvent) {
@@ -100,7 +109,16 @@ impl KademliaNode {
                 }
             }
 
-            return Poll::Pending;
+            loop {
+                if let Some(q) = self.queued_queries.pop_front() {
+                    println!("{q:?}");
+                    return Poll::Pending;
+                }
+
+                if self.queued_queries.is_empty() {
+                    return Poll::Pending;
+                }
+            }
         }
     }
 }
@@ -122,4 +140,13 @@ impl FusedStream for KademliaNode {
 #[derive(Serialize, Deserialize, Debug)]
 pub enum KademliaEvent {
     Ping(Key),
+    FindNode { target: Key },
+}
+
+#[derive(Debug)]
+enum Query {
+    OutboundQuery {
+        peers: Vec<Key>,
+        event: KademliaEvent,
+    },
 }

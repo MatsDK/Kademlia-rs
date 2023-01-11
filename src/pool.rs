@@ -142,6 +142,7 @@ async fn pending_outgoing(
                         .await
                         .unwrap();
                 }
+                _ => {}
             },
         }
 
@@ -189,6 +190,7 @@ async fn pending_incoming(
                         .await
                         .unwrap();
                 }
+                _ => {}
             },
         }
 

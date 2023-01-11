@@ -13,7 +13,9 @@ struct KBucket {
 
 impl KBucket {
     fn new() -> Self {
-        Self { nodes: ArrayVec::new() }
+        Self {
+            nodes: ArrayVec::new(),
+        }
     }
 
     fn get_keys(&self) -> Vec<Key> {
@@ -44,7 +46,7 @@ impl RoutingTable {
 
             // If the bucket is full we should check if there is a disconnected node
             if bucket.nodes.is_full() {
-                return
+                return;
             }
 
             bucket.nodes.push((target.clone(), addr));
@@ -53,7 +55,7 @@ impl RoutingTable {
         }
     }
 
-    pub fn closest_keys(&mut self, target: &Key) -> Vec<Key> {
+    pub fn closest_nodes(&mut self, target: &Key) -> Vec<Key> {
         let mut closest = Vec::new();
 
         let d = self.local_key.distance(target);
