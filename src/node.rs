@@ -2,7 +2,7 @@ use futures::{stream::FusedStream, Stream};
 use multiaddr::Multiaddr;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::VecDeque,
+    collections::{VecDeque, HashSet},
     io,
     pin::Pin,
     task::{Context, Poll},
@@ -21,6 +21,7 @@ pub struct KademliaNode {
     transport: Transport,
     pool: Pool,
     queued_queries: VecDeque<Query>,
+    connected_peers: HashSet<Key>
 }
 
 impl KademliaNode {
@@ -34,6 +35,7 @@ impl KademliaNode {
             transport,
             pool: Pool::new(key),
             queued_queries: VecDeque::new(),
+            connected_peers: HashSet::new()
         })
     }
 
@@ -56,12 +58,8 @@ impl KademliaNode {
 
     pub fn find_node(&mut self, target: &Key) {
         let peers = self.routing_table.closest_nodes(target);
-        self.queued_queries.push_back(Query::OutboundQuery {
-            peers,
-            event: KademliaEvent::FindNode {
-                target: target.clone(),
-            },
-        });
+        let query = Query::new(peers, KademliaEvent::FindNode { target: target.clone() });
+        self.queued_queries.push_back(query);
     }
 
     fn handle_transport_event(&mut self, ev: TransportEvent) {
@@ -84,6 +82,7 @@ impl KademliaNode {
                 println!("Established connection {key} {remote_addr}");
                 let endpoint = socketaddr_to_multiaddr(&remote_addr);
                 self.add_address(&key, endpoint);
+                self.connected_peers.insert(key);
             }
             PoolEvent::Request { key, event } => {
                 println!("new request from {key}: {event:?}")
@@ -110,8 +109,19 @@ impl KademliaNode {
             }
 
             loop {
-                if let Some(q) = self.queued_queries.pop_front() {
-                    println!("{q:?}");
+                if let Some(mut q) = self.queued_queries.pop_front() {
+                    match q.next() {
+                        QueryPoolState::Waiting((ev, key)) => {
+                            if self.connected_peers.contains(&key) {
+                                println!("should send event to {key} {ev:?}");
+
+                            } else {
+                                println!("should connect to peer {key}");
+                            }
+                        }
+                        QueryPoolState::Finished() => {}
+                        QueryPoolState::Idle => break
+                    }
                     return Poll::Pending;
                 }
 
@@ -144,9 +154,33 @@ pub enum KademliaEvent {
 }
 
 #[derive(Debug)]
-enum Query {
-    OutboundQuery {
-        peers: Vec<Key>,
-        event: KademliaEvent,
-    },
+enum QueryPoolState<'a> {
+    Waiting((&'a mut KademliaEvent, Key)),
+    Finished(),
+    Idle
 }
+
+#[derive(Debug)]
+struct Query {
+    peers: Vec<Key>,
+    event: KademliaEvent,
+}
+
+impl Query {
+    fn new(peers: Vec<Key>, event: KademliaEvent) -> Self {
+        Self {
+            peers,
+            event,
+        }
+    }
+
+    fn next(&mut self) -> QueryPoolState<'_> {
+        for peer_id in self.peers.iter() {
+            return QueryPoolState::Waiting((&mut self.event, peer_id.clone()));
+        }
+
+        return QueryPoolState::Idle
+
+    }
+}
+
