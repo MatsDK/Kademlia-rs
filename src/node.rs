@@ -2,7 +2,7 @@ use futures::{stream::FusedStream, Stream};
 use multiaddr::Multiaddr;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{VecDeque, HashSet},
+    collections::{HashSet, VecDeque},
     io,
     pin::Pin,
     task::{Context, Poll},
@@ -11,6 +11,7 @@ use std::{
 use crate::{
     key::Key,
     pool::{Pool, PoolEvent},
+    query::{Query, QueryPool, QueryPoolState},
     routing::RoutingTable,
     transport::{socketaddr_to_multiaddr, Transport, TransportEvent},
 };
@@ -20,8 +21,9 @@ pub struct KademliaNode {
     routing_table: RoutingTable,
     transport: Transport,
     pool: Pool,
-    queued_queries: VecDeque<Query>,
-    connected_peers: HashSet<Key>
+    // queued_queries: VecDeque<Query>,
+    queries: QueryPool,
+    connected_peers: HashSet<Key>,
 }
 
 impl KademliaNode {
@@ -34,8 +36,9 @@ impl KademliaNode {
             routing_table: RoutingTable::new(key.clone()),
             transport,
             pool: Pool::new(key),
-            queued_queries: VecDeque::new(),
-            connected_peers: HashSet::new()
+            // queued_queries: VecDeque::new(),
+            queries: QueryPool::new(),
+            connected_peers: HashSet::new(),
         })
     }
 
@@ -58,8 +61,14 @@ impl KademliaNode {
 
     pub fn find_node(&mut self, target: &Key) {
         let peers = self.routing_table.closest_nodes(target);
-        let query = Query::new(peers, KademliaEvent::FindNode { target: target.clone() });
-        self.queued_queries.push_back(query);
+        // let query = Query::new();
+        // self.queued_queries.push_back(query);
+        self.queries.add_query(
+            peers,
+            KademliaEvent::FindNode {
+                target: target.clone(),
+            },
+        );
     }
 
     fn handle_transport_event(&mut self, ev: TransportEvent) {
@@ -109,26 +118,23 @@ impl KademliaNode {
             }
 
             loop {
-                if let Some(mut q) = self.queued_queries.pop_front() {
-                    match q.next() {
-                        QueryPoolState::Waiting((ev, key)) => {
-                            if self.connected_peers.contains(&key) {
-                                println!("should send event to {key} {ev:?}");
-
-                            } else {
-                                println!("should connect to peer {key}");
-                            }
+                match self.queries.poll() {
+                    QueryPoolState::Waiting((q, key)) => {
+                        if self.connected_peers.contains(&key) {
+                            println!("should send event to {key} {q:?}");
+                        } else {
+                            println!("should connect to peer {key}");
                         }
-                        QueryPoolState::Finished() => {}
-                        QueryPoolState::Idle => break
                     }
-                    return Poll::Pending;
-                }
-
-                if self.queued_queries.is_empty() {
-                    return Poll::Pending;
+                    QueryPoolState::Finished(q) => {
+                        println!("Query finished: {:?}", q);
+                        break;
+                    }
+                    QueryPoolState::Idle => break,
                 }
             }
+
+            return Poll::Pending;
         }
     }
 }
@@ -147,40 +153,8 @@ impl FusedStream for KademliaNode {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum KademliaEvent {
     Ping(Key),
     FindNode { target: Key },
 }
-
-#[derive(Debug)]
-enum QueryPoolState<'a> {
-    Waiting((&'a mut KademliaEvent, Key)),
-    Finished(),
-    Idle
-}
-
-#[derive(Debug)]
-struct Query {
-    peers: Vec<Key>,
-    event: KademliaEvent,
-}
-
-impl Query {
-    fn new(peers: Vec<Key>, event: KademliaEvent) -> Self {
-        Self {
-            peers,
-            event,
-        }
-    }
-
-    fn next(&mut self) -> QueryPoolState<'_> {
-        for peer_id in self.peers.iter() {
-            return QueryPoolState::Waiting((&mut self.event, peer_id.clone()));
-        }
-
-        return QueryPoolState::Idle
-
-    }
-}
-

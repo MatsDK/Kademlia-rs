@@ -2,10 +2,12 @@ use clap::Parser;
 use futures::StreamExt;
 use multiaddr::Multiaddr;
 use std::io;
+use tokio::io::{stdin, AsyncBufReadExt, BufReader};
 
 mod key;
 mod node;
 mod pool;
+mod query;
 mod routing;
 mod transport;
 
@@ -38,10 +40,19 @@ async fn main() -> io::Result<()> {
         node.dial(dial).await?;
     }
 
+    let mut reader = BufReader::new(stdin()).lines();
+
     loop {
-        let key2 = Key::random();
-        let _ev = node.select_next_some().await;
-        let nodes = node.find_node(&key2);
+        tokio::select! {
+            Ok(Some(_line)) = reader.next_line() => {
+                // println!("line: {:?}", line);
+                let key = Key::random();
+                node.find_node(&key);
+            }
+            _ev = node.select_next_some() => {
+
+            }
+        }
         // println!("{nodes:?}");
     }
     // let mut nodes = Vec::new();
