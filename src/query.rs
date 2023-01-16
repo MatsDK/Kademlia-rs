@@ -95,6 +95,10 @@ impl Query {
         }
     }
 
+    pub fn get_event(&self) -> KademliaEvent {
+        self.event.clone()
+    }
+
     pub fn next(&mut self) -> QueryState {
         if self.count >= self.peers.len() {
             return QueryState::Finished;

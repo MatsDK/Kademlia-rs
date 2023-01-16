@@ -2,6 +2,7 @@ use futures::channel::mpsc;
 use futures::{AsyncReadExt, AsyncWriteExt, SinkExt, StreamExt};
 use multiaddr::Multiaddr;
 use std::collections::HashMap;
+use std::error::Error;
 use std::task::{Context, Poll};
 use std::{io, net::SocketAddr};
 
@@ -54,6 +55,10 @@ impl Pool {
         ));
     }
 
+    pub fn get_connection(&mut self, key: &Key) -> Option<&mut Connection> {
+        self.connections.get_mut(key)
+    }
+
     pub fn poll(&mut self, cx: &mut Context<'_>) -> Poll<PoolEvent> {
         loop {
             let event = match self.pending_connections_rx.poll_next_unpin(cx) {
@@ -99,6 +104,25 @@ impl Pool {
         }
 
         Poll::Pending
+    }
+}
+
+impl Connection {
+    pub fn send_event(&mut self, ev: KademliaEvent, cx: &mut Context<'_>) -> Option<KademliaEvent> {
+        match self.poll_ready_notify_handler(cx) {
+            Poll::Pending => return Some(ev),
+            Poll::Ready(Err(())) => None,
+            Poll::Ready(Ok(())) => {
+                self.command_sender
+                    .try_send(ev)
+                    .expect("Failed to send even on connection channel");
+                None
+            }
+        }
+    }
+
+    pub fn poll_ready_notify_handler(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), ()>> {
+        self.command_sender.poll_ready(cx).map_err(|_| ())
     }
 }
 
@@ -209,7 +233,7 @@ async fn established_connection(
     loop {
         tokio::select! {
             ev = command_receiver.next() => {
-
+                println!("Received event: {:?}", ev);
             }
             bytes_read = stream.read(&mut buf) => {
                 let bytes_read = match bytes_read {
