@@ -109,12 +109,14 @@ impl KademliaNode {
             loop {
                 match self.queries.poll() {
                     QueryPoolState::Finished(q) => {
+                        // self.pending_event = None;
                         // return Poll::Ready(q.get_event())
                         return Poll::Pending;
                     }
                     QueryPoolState::Waiting((q, key)) => {
                         if self.connected_peers.contains(&key) {
                             self.queued_events.push_back((key, q.get_event()));
+                            continue
                         } else {
                             println!("should connect to peer {key}");
                         }
@@ -135,6 +137,7 @@ impl KademliaNode {
                 Some((key, ev)) => match self.pool.get_connection(&key) {
                     Some(conn) => {
                         conn.send_event(ev, cx);
+                        // self.pending_event = None;
                         continue;
                     }
                     None => continue,
@@ -143,7 +146,10 @@ impl KademliaNode {
                     // Poll next query
                     match self.poll_next_query(cx) {
                         Poll::Pending => {}
-                        Poll::Ready(ev) => self.pending_event = Some(ev),
+                        Poll::Ready(ev) => {
+                            println!("{ev:?}");
+                            self.pending_event = Some(ev) 
+                        },
                     }
                 }
             }

@@ -233,7 +233,13 @@ async fn established_connection(
     loop {
         tokio::select! {
             ev = command_receiver.next() => {
-                println!("Received event: {:?}", ev);
+                if ev.is_none() {
+                    continue
+                }
+
+                println!("{ev:?}");
+                let ev = bincode::serialize(&ev.unwrap()).unwrap();
+                stream.write_all(&ev).await.unwrap();
             }
             bytes_read = stream.read(&mut buf) => {
                 let bytes_read = match bytes_read {
