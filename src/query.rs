@@ -4,7 +4,7 @@ use crate::{key::Key, node::KademliaEvent};
 
 #[derive(Debug)]
 pub enum QueryPoolState<'a> {
-    Waiting((&'a Query, Key)),
+    Waiting(Option<(&'a Query, Key)>),
     Finished(Query),
     Idle,
 }
@@ -61,7 +61,7 @@ impl QueryPool {
 
         if let Some((query_id, peer)) = waiting {
             let query = self.queries.get_mut(&query_id).expect("Query not found");
-            return QueryPoolState::Waiting((query, peer));
+            return QueryPoolState::Waiting(Some((query, peer)));
         }
 
         if let Some(query_id) = finished {
@@ -69,7 +69,11 @@ impl QueryPool {
             return QueryPoolState::Finished(query);
         }
 
-        QueryPoolState::Idle
+        if self.queries.is_empty() {
+            QueryPoolState::Idle
+        } else {
+            QueryPoolState::Waiting(None)
+        }
     }
 }
 

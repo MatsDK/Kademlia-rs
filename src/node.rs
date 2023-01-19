@@ -21,10 +21,9 @@ pub struct KademliaNode {
     routing_table: RoutingTable,
     transport: Transport,
     pool: Pool,
-    // queued_queries: VecDeque<Query>,
     queries: QueryPool,
     connected_peers: HashSet<Key>,
-    queued_events: VecDeque<(Key, KademliaEvent)>,
+    queued_events: VecDeque<NodeEvent>,
     pending_event: Option<(Key, KademliaEvent)>,
 }
 
@@ -100,28 +99,44 @@ impl KademliaNode {
         }
     }
 
-    fn poll_next_query(&mut self, cx: &mut Context<'_>) -> Poll<(Key, KademliaEvent)> {
+    fn handle_query_pool_event(&mut self, ev: NodeEvent) -> Option<()> {
+        match ev {
+            NodeEvent::Dial { peer_id } => {}
+            NodeEvent::Notify { peer_id, event } => {
+                self.pending_event = Some((peer_id, event));
+            }
+            NodeEvent::GenerateEvent => return Some(()),
+        }
+
+        None
+    }
+
+    fn poll_next_query(&mut self, cx: &mut Context<'_>) -> Poll<NodeEvent> {
         loop {
-            if let Some((key, ev)) = self.queued_events.pop_front() {
-                return Poll::Ready((key, ev));
+            // first get all the queued events from previous iterations
+            if let Some(ev) = self.queued_events.pop_front() {
+                return Poll::Ready(ev);
             }
 
             loop {
+                // poll the queries handler
                 match self.queries.poll() {
                     QueryPoolState::Finished(q) => {
-                        // self.pending_event = None;
-                        // return Poll::Ready(q.get_event())
-                        return Poll::Pending;
+                        return Poll::Ready(NodeEvent::GenerateEvent);
                     }
-                    QueryPoolState::Waiting((q, key)) => {
+                    QueryPoolState::Waiting(Some((q, key))) => {
                         if self.connected_peers.contains(&key) {
-                            self.queued_events.push_back((key, q.get_event()));
-                            continue
+                            self.queued_events.push_back(NodeEvent::Notify {
+                                peer_id: key,
+                                event: q.get_event(),
+                            });
                         } else {
                             println!("should connect to peer {key}");
+                            self.queued_events
+                                .push_back(NodeEvent::Dial { peer_id: key })
                         }
                     }
-                    QueryPoolState::Idle => break,
+                    QueryPoolState::Idle | QueryPoolState::Waiting(None) => break,
                 }
             }
 
@@ -133,13 +148,16 @@ impl KademliaNode {
 
     fn poll_next_event(&mut self, cx: &mut Context<'_>) -> Poll<()> {
         loop {
+            // If there is a pending query, let it make progress
+            // otherwise, let the query_pool make progress
             match self.pending_event.take() {
                 Some((key, ev)) => match self.pool.get_connection(&key) {
-                    Some(conn) => {
-                        conn.send_event(ev, cx);
-                        // self.pending_event = None;
-                        continue;
-                    }
+                    Some(conn) => match conn.send_event(ev, cx) {
+                        None => continue,
+                        Some(ev) => {
+                            self.pending_event = Some((key, ev));
+                        }
+                    },
                     None => continue,
                 },
                 None => {
@@ -148,12 +166,17 @@ impl KademliaNode {
                         Poll::Pending => {}
                         Poll::Ready(ev) => {
                             println!("{ev:?}");
-                            self.pending_event = Some(ev) 
-                        },
+                            if let Some(ev) = self.handle_query_pool_event(ev) {
+                                return Poll::Ready(());
+                            }
+
+                            continue;
+                        }
                     }
                 }
             }
 
+            // Poll the connection pool for updates
             match self.pool.poll(cx) {
                 Poll::Pending => {}
                 Poll::Ready(connection_ev) => {
@@ -162,6 +185,7 @@ impl KademliaNode {
                 }
             }
 
+            // Poll the listener for new connections
             match self.transport.poll(cx) {
                 Poll::Pending => {}
                 Poll::Ready(transport_ev) => {
@@ -193,4 +217,11 @@ impl FusedStream for KademliaNode {
 pub enum KademliaEvent {
     Ping(Key),
     FindNode { target: Key },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum NodeEvent {
+    Dial { peer_id: Key },
+    Notify { peer_id: Key, event: KademliaEvent },
+    GenerateEvent,
 }
