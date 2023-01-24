@@ -28,8 +28,8 @@ impl QueryPool {
             return;
         }
 
-        let query = Query::new(peers, ev);
         let query_id = self.next_query_id();
+        let query = Query::new(peers, ev, query_id);
         self.queries.insert(query_id, query);
     }
 
@@ -88,15 +88,21 @@ pub struct Query {
     peers: Vec<Key>,
     event: KademliaEvent,
     count: usize,
+    id: usize
 }
 
 impl Query {
-    pub fn new(peers: Vec<Key>, event: KademliaEvent) -> Self {
+    pub fn new(peers: Vec<Key>, event: KademliaEvent, query_id: usize) -> Self {
         Self {
             peers,
             event,
             count: 0,
+            id: query_id
         }
+    }
+
+    pub fn id(&self) -> usize {
+        self.id
     }
 
     pub fn get_event(&self) -> KademliaEvent {

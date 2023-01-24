@@ -11,7 +11,7 @@ use std::{
 use crate::{
     key::Key,
     pool::{Pool, PoolEvent},
-    query::{Query, QueryPool, QueryPoolState},
+    query::{QueryPool, QueryPoolState},
     routing::RoutingTable,
     transport::{socketaddr_to_multiaddr, Transport, TransportEvent},
 };
@@ -24,7 +24,7 @@ pub struct KademliaNode {
     queries: QueryPool,
     connected_peers: HashSet<Key>,
     queued_events: VecDeque<NodeEvent>,
-    pending_event: Option<(Key, KademliaEvent)>,
+    pending_event: Option<(Key, Kad)>,
 }
 
 impl KademliaNode {
@@ -128,7 +128,7 @@ impl KademliaNode {
                         if self.connected_peers.contains(&key) {
                             self.queued_events.push_back(NodeEvent::Notify {
                                 peer_id: key,
-                                event: q.get_event(),
+                                event: Kad::Request { query_id: q.id(), event: q.get_event() },
                             });
                         } else {
                             println!("should connect to peer {key}");
@@ -214,14 +214,26 @@ impl FusedStream for KademliaNode {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub enum KademliaEvent {
-    Ping(Key),
-    FindNode { target: Key },
+pub enum Kad {
+    Request {
+        query_id: usize,
+        event: KademliaEvent
+    },
+    Response {
+        query_id: usize,
+        event: KademliaEvent
+    },
+    Ping(Key)
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum KademliaEvent {
+    FindNode { target: Key },
+}
+
+#[derive(Debug, Clone)]
 pub enum NodeEvent {
     Dial { peer_id: Key },
-    Notify { peer_id: Key, event: KademliaEvent },
+    Notify { peer_id: Key, event: Kad },
     GenerateEvent,
 }
