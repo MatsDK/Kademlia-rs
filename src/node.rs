@@ -24,7 +24,7 @@ pub struct KademliaNode {
     queries: QueryPool,
     connected_peers: HashSet<Key>,
     queued_events: VecDeque<NodeEvent>,
-    pending_event: Option<(Key, Kad)>,
+    pending_event: Option<(Key, KademliaEvent)>,
 }
 
 impl KademliaNode {
@@ -63,10 +63,13 @@ impl KademliaNode {
 
     pub fn find_node(&mut self, target: &Key) {
         let peers = self.routing_table.closest_nodes(target);
+        let query_id = self.queries.next_query_id();
         self.queries.add_query(
             peers,
-            KademliaEvent::FindNode {
+            query_id,
+            KademliaEvent::FindNodeReq {
                 target: target.clone(),
+                request_id: query_id,
             },
         );
     }
@@ -128,7 +131,7 @@ impl KademliaNode {
                         if self.connected_peers.contains(&key) {
                             self.queued_events.push_back(NodeEvent::Notify {
                                 peer_id: key,
-                                event: Kad::Request { query_id: q.id(), event: q.get_event() },
+                                event: q.get_event(),
                             });
                         } else {
                             println!("should connect to peer {key}");
@@ -213,27 +216,37 @@ impl FusedStream for KademliaNode {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub enum Kad {
-    Request {
-        query_id: usize,
-        event: KademliaEvent
-    },
-    Response {
-        query_id: usize,
-        event: KademliaEvent
-    },
-    Ping(Key)
-}
+// #[derive(Serialize, Deserialize, Debug, Clone)]
+// pub enum Kad {
+//     Request {
+//         query_id: usize,
+//         event: KademliaEvent,
+//     },
+//     Response {
+//         query_id: usize,
+//         event: KademliaEvent,
+//     },
+//     Ping(Key),
+// }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum KademliaEvent {
-    FindNode { target: Key },
+    FindNodeReq {
+        target: Key,
+        request_id: usize,
+    },
+    FindNodeRes {
+        closest_nodes: Vec<Key>,
+        request_id: usize,
+    },
+    Ping {
+        target: Key,
+    },
 }
 
 #[derive(Debug, Clone)]
 pub enum NodeEvent {
     Dial { peer_id: Key },
-    Notify { peer_id: Key, event: Kad },
+    Notify { peer_id: Key, event: KademliaEvent },
     GenerateEvent,
 }

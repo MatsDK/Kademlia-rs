@@ -7,7 +7,7 @@ use std::task::{Context, Poll};
 use std::{io, net::SocketAddr};
 
 use crate::key::Key;
-use crate::node::{KademliaEvent, Kad};
+use crate::node::KademliaEvent;
 use crate::transport::{multiaddr_to_socketaddr, TcpStream};
 
 #[derive(Debug)]
@@ -132,7 +132,7 @@ async fn pending_outgoing(
     mut event_sender: mpsc::Sender<ConnectionEvent>,
     local_key: Key,
 ) {
-    let ev = Kad::Ping(local_key);
+    let ev = KademliaEvent::Ping { target: local_key };
     let ev = bincode::serialize(&ev).unwrap();
     stream.write_all(&ev).await.unwrap();
 
@@ -144,7 +144,7 @@ async fn pending_outgoing(
             continue;
         }
 
-        match bincode::deserialize::<Kad>(&buf[0..bytes_read]) {
+        match bincode::deserialize::<KademliaEvent>(&buf[0..bytes_read]) {
             Err(e) => {
                 println!("Failed to deserialize: {e}");
                 event_sender
@@ -156,10 +156,10 @@ async fn pending_outgoing(
                     .unwrap();
             }
             Ok(ev) => match ev {
-                Kad::Ping(key) => {
+                KademliaEvent::Ping { target } => {
                     event_sender
                         .send(ConnectionEvent::ConnectionEstablished {
-                            key,
+                            key: target,
                             remote_addr,
                             stream,
                         })
@@ -188,7 +188,7 @@ async fn pending_incoming(
             continue;
         }
 
-        match bincode::deserialize::<Kad>(&buf[0..bytes_read]) {
+        match bincode::deserialize::<KademliaEvent>(&buf[0..bytes_read]) {
             Err(e) => {
                 println!("Failed to deserialize: {e}");
                 event_sender
@@ -200,8 +200,8 @@ async fn pending_incoming(
                     .unwrap();
             }
             Ok(ev) => match ev {
-                Kad::Ping(key) => {
-                    let ev = Kad::Ping(local_key);
+                KademliaEvent::Ping { target: key } => {
+                    let ev = KademliaEvent::Ping { target: local_key };
                     let ev = bincode::serialize(&ev).unwrap();
                     stream.write_all(&ev).await.unwrap();
 
@@ -258,7 +258,7 @@ async fn established_connection(
                     continue
                 }
 
-                match bincode::deserialize::<Kad>(&buf[..bytes_read]) {
+                match bincode::deserialize::<KademliaEvent>(&buf[..bytes_read]) {
                     Ok(event) => {
                         event_sender.send(ConnectionEvent::Event { event, key: key.clone() }).await.unwrap();
                     }
@@ -292,12 +292,12 @@ pub enum ConnectionEvent {
     ConnectionFailed(io::Error),
     Event {
         key: Key,
-        event: Kad,
+        event: KademliaEvent,
     },
     Error(io::Error),
 }
 
 pub enum PoolEvent {
     NewConnection { key: Key, remote_addr: SocketAddr },
-    Request { key: Key, event: Kad },
+    Request { key: Key, event: KademliaEvent },
 }

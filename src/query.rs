@@ -23,17 +23,17 @@ impl QueryPool {
         }
     }
 
-    pub fn add_query(&mut self, peers: Vec<Key>, ev: KademliaEvent) {
+    pub fn add_query(&mut self, peers: Vec<Key>, query_id: usize, ev: KademliaEvent) {
         if peers.len() == 0 {
             return;
         }
 
-        let query_id = self.next_query_id();
+        // let query_id = self.next_query_id();
         let query = Query::new(peers, ev, query_id);
         self.queries.insert(query_id, query);
     }
 
-    fn next_query_id(&mut self) -> usize {
+    pub fn next_query_id(&mut self) -> usize {
         let id = self.next_query_id.clone();
         self.next_query_id = self.next_query_id.wrapping_add(1);
         id
@@ -88,7 +88,7 @@ pub struct Query {
     peers: Vec<Key>,
     event: KademliaEvent,
     count: usize,
-    id: usize
+    id: usize,
 }
 
 impl Query {
@@ -97,7 +97,7 @@ impl Query {
             peers,
             event,
             count: 0,
-            id: query_id
+            id: query_id,
         }
     }
 
