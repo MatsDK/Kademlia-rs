@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{key::Key, node::KademliaEvent};
+use crate::{key::Key, node::KademliaEvent, K_VALUE};
 
 #[derive(Debug)]
 pub enum QueryPoolState<'a> {
@@ -23,29 +23,35 @@ impl QueryPool {
         }
     }
 
-    pub fn add_query(&mut self, peers: Vec<Key>, query_id: usize, ev: KademliaEvent) {
-        if peers.len() == 0 {
+    pub fn add_query(&mut self, target: Key, peers: Vec<Key>, query_id: usize, ev: KademliaEvent) {
+        if peers.is_empty() {
             return;
         }
 
-        // let query_id = self.next_query_id();
-        let query = Query::new(peers, ev, query_id);
+        let peers_iter = PeersIter::new(target, peers);
+        let query = Query::new(peers_iter, ev, query_id);
         self.queries.insert(query_id, query);
     }
 
     pub fn next_query_id(&mut self) -> usize {
-        let id = self.next_query_id.clone();
+        let id = self.next_query_id;
         self.next_query_id = self.next_query_id.wrapping_add(1);
         id
     }
 
+    pub fn get_mut(&mut self, query_id: &usize) -> Option<&mut Query> {
+        self.queries.get_mut(query_id)
+    }
+
     pub fn poll(&mut self) -> QueryPoolState<'_> {
+        // TODO: handle timeout events
+
         let mut waiting = None;
         let mut finished = None;
 
         for (&query_id, query) in self.queries.iter_mut() {
             match query.next() {
-                QueryState::Waiting(peer) => {
+                QueryState::Waiting(Some(peer)) => {
                     waiting = Some((query_id, peer));
                     break;
                 }
@@ -53,9 +59,7 @@ impl QueryPool {
                     finished = Some(query_id);
                     break;
                 }
-                QueryState::Failed => {
-                    println!("Query failed");
-                }
+                QueryState::Waiting(None) | QueryState::Failed => {}
             }
         }
 
@@ -79,24 +83,22 @@ impl QueryPool {
 
 pub enum QueryState {
     Finished,
-    Waiting(Key),
+    Waiting(Option<Key>),
     Failed,
 }
 
 #[derive(Debug)]
 pub struct Query {
-    peers: Vec<Key>,
+    peers_iter: PeersIter,
     event: KademliaEvent,
-    count: usize,
     id: usize,
 }
 
 impl Query {
-    pub fn new(peers: Vec<Key>, event: KademliaEvent, query_id: usize) -> Self {
+    pub fn new(peers_iter: PeersIter, event: KademliaEvent, query_id: usize) -> Self {
         Self {
-            peers,
+            peers_iter,
             event,
-            count: 0,
             id: query_id,
         }
     }
@@ -109,12 +111,120 @@ impl Query {
         self.event.clone()
     }
 
+    pub fn on_success(&mut self, peer: &Key, closer_peers: Vec<Key>) {
+        self.peers_iter.on_success(peer, closer_peers);
+    }
+
     pub fn next(&mut self) -> QueryState {
-        if self.count >= self.peers.len() {
+        self.peers_iter.next()
+    }
+}
+
+#[derive(Debug)]
+enum PeersIterState {
+    Finished,
+    Iterating,
+    Waiting(Option<Key>),
+}
+
+#[derive(Debug)]
+pub struct PeersIter {
+    state: PeersIterState,
+    target: Key,
+    closest_peers: Vec<Peer>,
+    num_waiting: usize,
+    num_results: usize,
+}
+
+impl PeersIter {
+    pub fn new(target: Key, closest_peers: Vec<Key>) -> Self {
+        let l = closest_peers.len();
+        let closest_peers = closest_peers
+            .into_iter()
+            .map(|key| Peer {
+                key,
+                state: PeerState::NotContacted,
+            })
+            .collect();
+
+        Self {
+            state: PeersIterState::Iterating,
+            target,
+            closest_peers,
+            num_waiting: 0,
+            // num_results: l,
+            num_results: K_VALUE,
+        }
+    }
+
+    pub fn on_success(&mut self, peer_id: &Key, closer_peers: Vec<Key>) {
+        let peer = self
+            .closest_peers
+            .iter_mut()
+            .find(|peer| peer.key == *peer_id);
+        if let Some(mut peer) = peer {
+            match peer.state {
+                PeerState::Waiting => {
+                    self.num_waiting -= 1;
+                    peer.state = PeerState::Succeeded
+                }
+                PeerState::Unresponsive => peer.state = PeerState::Succeeded,
+                PeerState::NotContacted | PeerState::Succeeded | PeerState::Failed => {}
+            }
+        }
+    }
+
+    pub fn next(&mut self) -> QueryState {
+        if let PeersIterState::Finished = self.state {
             return QueryState::Finished;
         }
-        self.count += 1;
 
-        QueryState::Waiting(self.peers[self.count - 1].clone())
+        let mut result_counter = 0;
+
+        for peer in self.closest_peers.iter_mut() {
+            match peer.state {
+                PeerState::NotContacted => {
+                    // TODO: check if 'self.num_waiting' is below some maximum
+
+                    self.num_waiting += 1;
+                    peer.state = PeerState::Waiting;
+                    return QueryState::Waiting(Some(peer.key.clone()));
+                }
+                PeerState::Waiting => {
+                    // TODO: check for timeout
+                }
+                PeerState::Succeeded => {
+                    result_counter += 1;
+
+                    if result_counter >= self.num_results {
+                        self.state = PeersIterState::Finished;
+                        return QueryState::Finished;
+                    }
+                }
+                PeerState::Unresponsive | PeerState::Failed => {}
+            }
+        }
+
+        if self.num_waiting > 0 {
+            QueryState::Waiting(None)
+        } else {
+            self.state = PeersIterState::Finished;
+            QueryState::Finished
+        }
     }
+}
+
+#[derive(Debug)]
+enum PeerState {
+    NotContacted,
+    Waiting,
+    Succeeded,
+    Unresponsive,
+    Failed,
+}
+
+#[derive(Debug)]
+struct Peer {
+    key: Key,
+    state: PeerState,
 }

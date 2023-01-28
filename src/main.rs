@@ -50,7 +50,6 @@ async fn main() -> io::Result<()> {
                 node.find_node(&key);
             }
             _ev = node.select_next_some() => {
-
             }
         }
         // println!("{nodes:?}");

@@ -63,7 +63,7 @@ impl Pool {
         loop {
             let event = match self.pending_connections_rx.poll_next_unpin(cx) {
                 Poll::Ready(Some(ev)) => ev,
-                Poll::Ready(None) => unreachable!("Got None in poll_next_unping"),
+                Poll::Ready(None) => unreachable!("Got None in poll_next_unpin"),
                 Poll::Pending => break,
             };
 
@@ -110,7 +110,7 @@ impl Pool {
 impl Connection {
     pub fn send_event(&mut self, ev: KademliaEvent, cx: &mut Context<'_>) -> Option<KademliaEvent> {
         match self.poll_ready_notify_handler(cx) {
-            Poll::Pending => return Some(ev),
+            Poll::Pending => Some(ev),
             Poll::Ready(Err(())) => None,
             Poll::Ready(Ok(())) => {
                 self.command_sender
@@ -155,8 +155,8 @@ async fn pending_outgoing(
                     .await
                     .unwrap();
             }
-            Ok(ev) => match ev {
-                KademliaEvent::Ping { target } => {
+            Ok(ev) => {
+                if let KademliaEvent::Ping { target } = ev {
                     event_sender
                         .send(ConnectionEvent::ConnectionEstablished {
                             key: target,
@@ -166,8 +166,7 @@ async fn pending_outgoing(
                         .await
                         .unwrap();
                 }
-                _ => {}
-            },
+            }
         }
 
         break;
@@ -199,23 +198,22 @@ async fn pending_incoming(
                     .await
                     .unwrap();
             }
-            Ok(ev) => match ev {
-                KademliaEvent::Ping { target: key } => {
+            Ok(ev) => {
+                if let KademliaEvent::Ping { target } = ev {
                     let ev = KademliaEvent::Ping { target: local_key };
                     let ev = bincode::serialize(&ev).unwrap();
                     stream.write_all(&ev).await.unwrap();
 
                     event_sender
                         .send(ConnectionEvent::ConnectionEstablished {
-                            key,
+                            key: target,
                             remote_addr,
                             stream,
                         })
                         .await
                         .unwrap();
                 }
-                _ => {}
-            },
+            }
         }
 
         break;
@@ -237,7 +235,6 @@ async fn established_connection(
                     continue
                 }
 
-                println!("{ev:?}");
                 let ev = bincode::serialize(&ev.unwrap()).unwrap();
                 stream.write_all(&ev).await.unwrap();
             }
@@ -297,6 +294,7 @@ pub enum ConnectionEvent {
     Error(io::Error),
 }
 
+#[derive(Debug)]
 pub enum PoolEvent {
     NewConnection { key: Key, remote_addr: SocketAddr },
     Request { key: Key, event: KademliaEvent },

@@ -39,7 +39,7 @@ impl RoutingTable {
 
     pub fn insert(&mut self, target: &Key, addr: Multiaddr) {
         let d = &self.local_key.distance(target);
-        let bucket_idx = BucketIndex::new(&d);
+        let bucket_idx = BucketIndex::new(d);
 
         if let Some(i) = bucket_idx {
             let bucket = &mut self.kbuckets[i.index()];
@@ -91,7 +91,8 @@ impl RoutingTable {
         }
 
         // Sort by distance to local_key
-        closest.sort_by(|a, b| self.local_key.distance(a).cmp(&self.local_key.distance(b)));
+        // closest.sort_by(|a, b| self.local_key.distance(a).cmp(&self.local_key.distance(b)));
+        closest.sort_by_key(|a| self.local_key.distance(a));
 
         if closest.len() > K_VALUE {
             return closest[..K_VALUE].to_vec();
