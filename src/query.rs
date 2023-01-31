@@ -138,7 +138,6 @@ pub struct PeersIter {
 
 impl PeersIter {
     pub fn new(target: Key, closest_peers: Vec<Key>) -> Self {
-        let l = closest_peers.len();
         let closest_peers = closest_peers
             .into_iter()
             .map(|key| Peer {
@@ -152,16 +151,17 @@ impl PeersIter {
             target,
             closest_peers,
             num_waiting: 0,
-            // num_results: l,
             num_results: K_VALUE,
         }
     }
 
     pub fn on_success(&mut self, peer_id: &Key, closer_peers: Vec<Key>) {
+        // println!("Got response from {} with {:?}", peer_id, closer_peers);
         let peer = self
             .closest_peers
             .iter_mut()
             .find(|peer| peer.key == *peer_id);
+
         if let Some(mut peer) = peer {
             match peer.state {
                 PeerState::Waiting => {

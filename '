@@ -73,7 +73,7 @@ impl KademliaNode {
                 target: target.clone(),
                 request_id: query_id,
             },
-        );
+            );
     }
 
     fn handle_transport_event(&mut self, ev: TransportEvent) {
@@ -110,13 +110,6 @@ impl KademliaNode {
             } => {
                 if let Some(query) = self.queries.get_mut(&request_id) {
                     query.on_success(&key, closest_nodes);
-
-                    //     OutboundQueryProgressed {
-                    //         result: QueryResult::FindNode {
-                    //             nodes: closest_nodes,
-                    //         },
-                    //     },
-                    // ))
                 }
             }
             KademliaEvent::Ping { .. } => {}
@@ -141,13 +134,12 @@ impl KademliaNode {
 
     fn handle_query_pool_event(&mut self, ev: NodeEvent) -> Option<NodeEvent> {
         match ev {
-            NodeEvent::Dial { peer_id } => return Some(NodeEvent::Dial { peer_id }),
+            NodeEvent::Dial { peer_id } => return Some(()),
             NodeEvent::Notify { peer_id, event } => {
                 assert!(self.pending_event.is_none());
                 self.pending_event = Some((peer_id, event));
             }
             NodeEvent::GenerateEvent(ev) => return Some(NodeEvent::GenerateEvent(ev)),
-            _ => {}
         }
 
         None
@@ -164,11 +156,8 @@ impl KademliaNode {
                 // poll the queries handler
                 match self.queries.poll() {
                     QueryPoolState::Finished(q) => {
-                        // println!("Query is done {:?}", q);
-                        // TODO: match different query results
-                        return Poll::Ready(NodeEvent::GenerateEvent(OutboundQueryProgressed {
-                            result: QueryResult::FindNode { nodes: vec![] },
-                        }));
+                        println!("Query is done {:?}", q);
+                        return Poll::Ready(NodeEvent::GenerateEvent);
                     }
                     QueryPoolState::Waiting(Some((q, key))) => {
                         if self.connected_peers.contains(&key) {
@@ -192,7 +181,7 @@ impl KademliaNode {
         }
     }
 
-    fn poll_next_event(&mut self, cx: &mut Context<'_>) -> Poll<NodeEvent> {
+    fn poll_next_event(&mut self, cx: &mut Context<'_>) -> Poll<()> {
         loop {
             // If there is a pending query, let it make progress
             // otherwise, let the query_pool make progress
@@ -218,7 +207,7 @@ impl KademliaNode {
                         Poll::Pending => {}
                         Poll::Ready(ev) => {
                             if let Some(ev) = self.handle_query_pool_event(ev) {
-                                return Poll::Ready(ev);
+                                return Poll::Ready(());
                             }
 
                             continue;
@@ -232,7 +221,7 @@ impl KademliaNode {
                 Poll::Pending => {}
                 Poll::Ready(connection_ev) => {
                     if let Some(_) = self.handle_pool_event(connection_ev) {
-                        return Poll::Ready(NodeEvent::Unknown);
+                        return Poll::Ready(());
                     }
 
                     continue;
@@ -244,7 +233,7 @@ impl KademliaNode {
                 Poll::Pending => {}
                 Poll::Ready(transport_ev) => {
                     self.handle_transport_event(transport_ev);
-                    return Poll::Ready(NodeEvent::Unknown);
+                    return Poll::Ready(());
                 }
             }
 
@@ -254,7 +243,7 @@ impl KademliaNode {
 }
 
 impl Stream for KademliaNode {
-    type Item = NodeEvent;
+    type Item = ();
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.poll_next_event(cx).map(Some)
@@ -287,15 +276,17 @@ pub enum NodeEvent {
     Dial { peer_id: Key },
     Notify { peer_id: Key, event: KademliaEvent },
     GenerateEvent(OutboundQueryProgressed),
-    Unknown,
 }
 
 #[derive(Debug, Clone)]
 pub struct OutboundQueryProgressed {
-    result: QueryResult,
+    result: QueryResult
 }
 
 #[derive(Debug, Clone)]
 enum QueryResult {
-    FindNode { nodes: Vec<Key> },
+    FindNode {
+        nodes: Vec<Key>
+    }
 }
+

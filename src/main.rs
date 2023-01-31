@@ -49,7 +49,8 @@ async fn main() -> io::Result<()> {
                 let key = Key::random();
                 node.find_node(&key);
             }
-            _ev = node.select_next_some() => {
+            ev = node.select_next_some() => {
+                println!("{:?}", ev);
             }
         }
         // println!("{nodes:?}");
