@@ -156,7 +156,6 @@ impl PeersIter {
     }
 
     pub fn on_success(&mut self, peer_id: &Key, closer_peers: Vec<Key>) {
-        // println!("Got response from {} with {:?}", peer_id, closer_peers);
         let peer = self
             .closest_peers
             .iter_mut()
@@ -172,6 +171,8 @@ impl PeersIter {
                 PeerState::NotContacted | PeerState::Succeeded | PeerState::Failed => {}
             }
         }
+
+        // TODO: Add discovered peers to iterator
     }
 
     pub fn next(&mut self) -> QueryState {
