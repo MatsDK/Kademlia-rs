@@ -56,7 +56,7 @@ impl KademliaNode {
     pub async fn boostrap(&mut self) -> io::Result<()> {
         let local_key = self.routing_table.local_key.clone();
 
-        let peers = self.routing_table.closest_nodes(&local_key.clone());
+        let peers = self.routing_table.closest_nodes(&local_key);
         let query_id = self.queries.next_query_id();
         self.queries.add_query(
             local_key.clone(),
@@ -109,6 +109,7 @@ impl KademliaNode {
     }
 
     fn handle_incoming_event(&mut self, key: Key, ev: KademliaEvent) {
+        println!("Incoming event: {:?}", ev);
         match ev {
             KademliaEvent::FindNodeReq { target, request_id } => {
                 let closest_nodes = self.routing_table.closest_nodes(&target);
@@ -147,6 +148,7 @@ impl KademliaNode {
                 let endpoint = socketaddr_to_multiaddr(&remote_addr);
                 self.add_address(&key, endpoint);
                 self.connected_peers.insert(key.clone());
+
                 let out_ev = OutEvent::ConnectionEstablished(key);
                 return Some(NodeEvent::GenerateEvent(out_ev));
             }
