@@ -118,6 +118,7 @@ impl AsyncWrite for TcpStream {
         cx: &mut Context,
         buf: &[u8],
     ) -> Poll<Result<usize, io::Error>> {
+        println!("send ev to connection: {:?}", buf);
         tokio::io::AsyncWrite::poll_write(Pin::new(&mut self.0), cx, buf)
     }
 

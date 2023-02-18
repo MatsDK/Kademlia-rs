@@ -109,7 +109,7 @@ impl KademliaNode {
     }
 
     fn handle_incoming_event(&mut self, key: Key, ev: KademliaEvent) {
-        println!("Incoming event: {:?}", ev);
+        // println!("Incoming event: {:?}", ev);
         match ev {
             KademliaEvent::FindNodeReq { target, request_id } => {
                 let closest_nodes = self.routing_table.closest_nodes(&target);
