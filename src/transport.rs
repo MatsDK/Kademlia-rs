@@ -45,7 +45,7 @@ impl Transport {
             Err(err) => return Err(err.to_string()),
         }
 
-        let s: net::TcpStream = socket.into();
+        let s: std::net::TcpStream = socket.into();
         let stream = tokio::net::TcpStream::try_from(s).unwrap();
 
         stream.writable().await.unwrap();

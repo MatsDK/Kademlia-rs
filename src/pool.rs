@@ -1,7 +1,10 @@
 use futures::channel::mpsc;
-use futures::{AsyncReadExt, AsyncWriteExt, SinkExt, StreamExt};
+use futures::future::Either;
+use futures::{AsyncReadExt, AsyncWriteExt, FutureExt, SinkExt, StreamExt};
 use multiaddr::Multiaddr;
 use std::collections::HashMap;
+use std::future::poll_fn;
+use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::{io, net::SocketAddr};
 
@@ -33,8 +36,8 @@ pub struct Pool {
 
 impl Pool {
     pub fn new(local_key: Key) -> Self {
-        let (pending_connections_tx, pending_connections_rx) = mpsc::channel(0);
-        let (established_connections_tx, established_connections_rx) = mpsc::channel(0);
+        let (pending_connections_tx, pending_connections_rx) = mpsc::channel(32);
+        let (established_connections_tx, established_connections_rx) = mpsc::channel(32);
 
         Self {
             local_key,
@@ -93,7 +96,7 @@ impl Pool {
                     remote_addr,
                     stream,
                 } => {
-                    let (command_sender, command_receiver) = mpsc::channel(0);
+                    let (command_sender, command_receiver) = mpsc::channel(32);
                     let connection = Connection {
                         remote_addr,
                         stream,
@@ -129,22 +132,25 @@ impl Pool {
 }
 
 impl Connection {
-    pub async fn poll(&mut self) -> Poll<Result<Vec<u8>, ()>> {
+    pub fn poll(&mut self, cx: &mut Context<'_>) -> Poll<Result<Vec<u8>, ()>> {
         let mut buf = vec![0; 1024];
+        let mut buf2 = [0; 1024];
 
         loop {
-            let bytes_read = self.stream.read(&mut buf).await;
-            let bytes_read = match bytes_read {
-                Err(e) => {
-                    return Poll::Ready(Err(()));
-                }
-                Ok(b) => b,
-            };
+            let mut read_buf = tokio::io::ReadBuf::new(&mut buf2);
+            futures::ready!(tokio::io::AsyncRead::poll_read(
+                Pin::new(&mut self.stream.0),
+                cx,
+                &mut read_buf
+            ))
+            .unwrap();
+            let bytes_read = read_buf.filled().len();
+            // let bytes_read = self.stream.read(&mut buf).await;
             if bytes_read == 0 {
-                continue;
+                return Poll::Pending;
             }
 
-            return Poll::Ready(Ok(buf[..bytes_read].to_vec()));
+            return Poll::Ready(Ok(buf2[..bytes_read].to_vec()));
         }
     }
 
@@ -164,7 +170,7 @@ impl EstablishedConnection {
             Poll::Ready(Ok(())) => {
                 self.sender
                     .try_send(ev)
-                    .expect("Failed to send even on connection channel");
+                    .expect("failed to send to receiver for connection");
                 None
             }
         }
@@ -276,44 +282,88 @@ async fn established_connection(
     mut event_sender: mpsc::Sender<EstablishedConnectionEvent>,
 ) {
     loop {
-        tokio::select! {
-            command = command_receiver.next() => {
-                match command {
-                    None => return,
-                    Some(command) => {
-                        let ev = bincode::serialize(&command).unwrap();
-                        connection.send_event(&ev).await.unwrap()
-                    }
-                }
+        match futures::future::select(
+            // poll_fn(|cx| command_receiver.poll_next_unpin(cx)),
+            command_receiver.next(),
+            poll_fn(|cx| Pin::new(&mut connection).poll(cx)),
+        )
+        .await
+        {
+            Either::Left((Some(command), _)) => {
+                println!("receive command");
+
+                let ev = bincode::serialize(&command).unwrap();
+                connection.send_event(&ev).await.unwrap();
             }
-            buf = connection.poll() => {
-                let buf = match buf {
-                    Poll::Ready(b) => b,
-                    Poll::Pending => return
-                };
-                let buf= buf.unwrap();
+            Either::Left((None, _)) => return,
+            Either::Right((buf, _)) => {
+                let buf = buf.unwrap();
                 match bincode::deserialize::<KademliaEvent>(&buf[..]) {
                     Ok(event) => {
-                        event_sender.send(EstablishedConnectionEvent::Event { event, key: key.clone() }).await.unwrap();
+                        event_sender
+                            .send(EstablishedConnectionEvent::Event {
+                                event,
+                                key: key.clone(),
+                            })
+                            .await
+                            .unwrap();
                     }
                     Err(e) => {
                         println!("Failed to deserialize: {e}");
                         event_sender
                             .send(EstablishedConnectionEvent::Error(io::Error::new(
-                                        io::ErrorKind::Other,
-                                        "Failed to deserialize event".to_string(),
-                                        )))
+                                io::ErrorKind::Other,
+                                "Failed to deserialize event".to_string(),
+                            )))
                             .await
                             .unwrap();
+                        command_receiver.close();
 
                         // stream.close().await.unwrap();
 
-                        break
+                        break;
                     }
                 }
-
             }
         }
+        // tokio::select! {
+        //     command = command_receiver.next() => {
+        //         match command {
+        //             None => return,
+        //             Some(command) => {
+        //                 let ev = bincode::serialize(&command).unwrap();
+        //                 connection.send_event(&ev).await.unwrap()
+        //             }
+        //         }
+        //     }
+        //     buf = connection.poll() => {
+        //         let buf = match buf {
+        //             Poll::Ready(b) => b,
+        //             Poll::Pending => return
+        //         };
+        //         let buf= buf.unwrap();
+        //         match bincode::deserialize::<KademliaEvent>(&buf[..]) {
+        //             Ok(event) => {
+        //                 event_sender.send(EstablishedConnectionEvent::Event { event, key: key.clone() }).await.unwrap();
+        //             }
+        //             Err(e) => {
+        //                 println!("Failed to deserialize: {e}");
+        //                 event_sender
+        //                     .send(EstablishedConnectionEvent::Error(io::Error::new(
+        //                                 io::ErrorKind::Other,
+        //                                 "Failed to deserialize event".to_string(),
+        //                                 )))
+        //                     .await
+        //                     .unwrap();
+
+        //                 // stream.close().await.unwrap();
+
+        //                 break
+        //             }
+        //         }
+
+        //     }
+        // }
     }
 }
 
