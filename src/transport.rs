@@ -14,6 +14,7 @@ pub struct Transport {
     listener: TcpListenStream,
 }
 
+// TODO: refactor error handling, remove unwraps
 impl Transport {
     pub async fn new(addr: &Multiaddr) -> Result<Self, String> {
         let socket_addr = if let Ok(sa) = multiaddr_to_socketaddr(addr.clone()) {
@@ -38,10 +39,35 @@ impl Transport {
         };
 
         let socket = self.create_socket(&socket_addr).unwrap();
-        // socket.set_nonblocking(true).unwrap();
+
+        // Set socket to nonblocking mode, this way the individual connnection
+        // threads will not block and prevent themselves from receiving commands.
+        socket.set_nonblocking(true).unwrap();
+
+        //     let dial_fut = Ok(async move {
+        //         match socket.connect(&socket_addr.into()) {
+        //             Ok(()) => {}
+        //             Err(err) if err.raw_os_error() == Some(libc::EINPROGRESS) => {}
+        //             Err(err) if err.kind() == io::ErrorKind::WouldBlock => {}
+        //             Err(err) => return Err(err),
+        //         }
+
+        //         let s: std::net::TcpStream = socket.into();
+        //         let stream = tokio::net::TcpStream::try_from(s).unwrap();
+
+        //         stream.writable().await.unwrap();
+
+        //         if let Some(e) = stream.take_error()? {
+        //             return Err(e);
+        //         }
+
+        //         Ok(TcpStream(stream))
+        //     }.boxed());
 
         match socket.connect(&socket_addr.into()) {
             Ok(()) => {}
+            Err(err) if err.raw_os_error() == Some(libc::EINPROGRESS) => {}
+            Err(err) if err.kind() == io::ErrorKind::WouldBlock => {}
             Err(err) => return Err(err.to_string()),
         }
 
@@ -69,6 +95,7 @@ impl Transport {
             socket.set_only_v6(true)?;
         }
         socket.set_nodelay(true)?;
+        // socket.set_nonblocking(true).unwrap();
 
         Ok(socket)
     }
@@ -118,7 +145,6 @@ impl AsyncWrite for TcpStream {
         cx: &mut Context,
         buf: &[u8],
     ) -> Poll<Result<usize, io::Error>> {
-        println!("send ev to connection: {:?}", buf);
         tokio::io::AsyncWrite::poll_write(Pin::new(&mut self.0), cx, buf)
     }
 

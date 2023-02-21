@@ -109,7 +109,6 @@ impl KademliaNode {
     }
 
     fn handle_incoming_event(&mut self, key: Key, ev: KademliaEvent) {
-        // println!("Incoming event: {:?}", ev);
         match ev {
             KademliaEvent::FindNodeReq { target, request_id } => {
                 let closest_nodes = self.routing_table.closest_nodes(&target);
@@ -120,8 +119,6 @@ impl KademliaNode {
                         request_id,
                     },
                 });
-
-                // self.queued_events.push_back(NodeEvent::GenerateEvent);
             }
             KademliaEvent::FindNodeRes {
                 closest_nodes,
@@ -129,13 +126,6 @@ impl KademliaNode {
             } => {
                 if let Some(query) = self.queries.get_mut(&request_id) {
                     query.on_success(&key, closest_nodes);
-
-                    //     OutboundQueryProgressed {
-                    //         result: QueryResult::FindNode {
-                    //             nodes: closest_nodes,
-                    //         },
-                    //     },
-                    // ))
                 }
             }
             KademliaEvent::Ping { .. } => {}
@@ -162,7 +152,7 @@ impl KademliaNode {
     fn handle_query_pool_event(&mut self, ev: NodeEvent) -> Option<NodeEvent> {
         match ev {
             NodeEvent::Dial { peer_id } => {
-                // self.dial(addr)
+                // TODO: dial the peer
             }
             NodeEvent::Notify { peer_id, event } => {
                 assert!(self.pending_event.is_none());
@@ -216,7 +206,7 @@ impl KademliaNode {
     fn poll_next_event(&mut self, cx: &mut Context<'_>) -> Poll<OutEvent> {
         loop {
             // If there is a pending query, let it make progress
-            // otherwise, let the query_pool make progress
+            // otherwise, let the `QueryPool` make progress.
             match self.pending_event.take() {
                 Some((key, ev)) => {
                     self.pending_event = None;
@@ -250,7 +240,7 @@ impl KademliaNode {
                 }
             }
 
-            // Poll the connection pool for updates
+            // Poll the connection pool for updates.
             match self.pool.poll(cx) {
                 Poll::Pending => {}
                 Poll::Ready(connection_ev) => {
@@ -264,7 +254,7 @@ impl KademliaNode {
                 }
             }
 
-            // Poll the listener for new connections
+            // Poll the listener for new connections.
             match self.transport.poll(cx) {
                 Poll::Pending => {}
                 Poll::Ready(transport_ev) => {
