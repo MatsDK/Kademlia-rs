@@ -124,8 +124,11 @@ impl KademliaNode {
                 closest_nodes,
                 request_id,
             } => {
+                println!("response");
+                let local_key = self.local_key().clone();
+
                 if let Some(query) = self.queries.get_mut(&request_id) {
-                    query.on_success(&key, closest_nodes);
+                    query.on_success(&key, closest_nodes, local_key);
                 }
             }
             KademliaEvent::Ping { .. } => {}
@@ -152,6 +155,7 @@ impl KademliaNode {
     fn handle_query_pool_event(&mut self, ev: NodeEvent) -> Option<NodeEvent> {
         match ev {
             NodeEvent::Dial { peer_id } => {
+                println!("dial {}", peer_id);
                 // TODO: dial the peer
             }
             NodeEvent::Notify { peer_id, event } => {
@@ -188,7 +192,6 @@ impl KademliaNode {
                                 event: q.get_event(),
                             });
                         } else {
-                            println!("should connect to peer {key}");
                             self.queued_events
                                 .push_back(NodeEvent::Dial { peer_id: key })
                         }

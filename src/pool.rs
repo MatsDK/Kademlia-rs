@@ -169,9 +169,8 @@ impl Connection {
 
 impl EstablishedConnection {
     pub fn send_event(&mut self, ev: KademliaEvent, cx: &mut Context<'_>) -> Option<KademliaEvent> {
-        // Before notifying a connection thread, `poll_ready_notify_handler` checks
-        // if the `command_receiver` is ready to receive an event, if not,
-        // return the event to try again later.
+        // Before notifying a connection thread, `poll_ready_notify_handler` checks if the
+        // `command_receiver` is ready to receive an event, if not, return the event to try again later.
         match self.poll_ready_notify_handler(cx) {
             Poll::Pending => Some(ev),
             Poll::Ready(Err(())) => None,

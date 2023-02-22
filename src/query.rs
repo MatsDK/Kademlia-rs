@@ -1,6 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{btree_map::Entry, BTreeMap, HashMap};
 
-use crate::{key::Key, node::KademliaEvent, K_VALUE};
+use crate::{
+    key::{Distance, Key},
+    node::KademliaEvent,
+    K_VALUE,
+};
 
 #[derive(Debug)]
 pub enum QueryPoolState<'a> {
@@ -111,8 +115,12 @@ impl Query {
         self.event.clone()
     }
 
-    pub fn on_success(&mut self, peer: &Key, closer_peers: Vec<Key>) {
-        self.peers_iter.on_success(peer, closer_peers);
+    pub fn on_success(&mut self, peer: &Key, closer_peers: Vec<Key>, local_key: Key) {
+        let other_peers = closer_peers
+            .into_iter()
+            .filter(|p| p != &local_key)
+            .collect();
+        self.peers_iter.on_success(peer, other_peers);
     }
 
     pub fn next(&mut self) -> QueryState {
@@ -124,28 +132,30 @@ impl Query {
 enum PeersIterState {
     Finished,
     Iterating,
-    Waiting(Option<Key>),
+    Stalled,
 }
 
 #[derive(Debug)]
 pub struct PeersIter {
     state: PeersIterState,
     target: Key,
-    closest_peers: Vec<Peer>,
+    closest_peers: BTreeMap<Distance, Peer>,
     num_waiting: usize,
     num_results: usize,
 }
 
 impl PeersIter {
     pub fn new(target: Key, closest_peers: Vec<Key>) -> Self {
-        let closest_peers = closest_peers
-            .into_iter()
-            .map(|key| Peer {
-                key,
-                state: PeerState::NotContacted,
-            })
-            .collect();
-
+        let closest_peers = BTreeMap::from_iter(closest_peers.into_iter().map(|key| {
+            let distance = key.distance(&target);
+            (
+                distance,
+                Peer {
+                    key,
+                    state: PeerState::NotContacted,
+                },
+            )
+        }));
         Self {
             state: PeersIterState::Iterating,
             target,
@@ -155,24 +165,45 @@ impl PeersIter {
         }
     }
 
-    pub fn on_success(&mut self, peer_id: &Key, closer_peers: Vec<Key>) {
-        let peer = self
-            .closest_peers
-            .iter_mut()
-            .find(|peer| peer.key == *peer_id);
-
-        if let Some(mut peer) = peer {
-            match peer.state {
-                PeerState::Waiting => {
-                    self.num_waiting -= 1;
-                    peer.state = PeerState::Succeeded
-                }
-                PeerState::Unresponsive => peer.state = PeerState::Succeeded,
-                PeerState::NotContacted | PeerState::Succeeded | PeerState::Failed => {}
-            }
+    pub fn on_success(&mut self, peer_id: &Key, closer_peers: Vec<Key>) -> bool {
+        if let PeersIterState::Finished = self.state {
+            return false;
         }
 
-        // TODO: Add discovered peers to iterator
+        let distance = peer_id.distance(&self.target);
+        // Update the state of the resolved peer
+        match self.closest_peers.entry(distance) {
+            Entry::Vacant(..) => return false,
+            Entry::Occupied(mut e) => match e.get().state {
+                PeerState::Waiting => {
+                    self.num_waiting -= 1;
+                    e.get_mut().state = PeerState::Succeeded;
+                }
+                PeerState::Unresponsive => {
+                    e.get_mut().state = PeerState::Succeeded;
+                }
+                PeerState::NotContacted | PeerState::Failed | PeerState::Succeeded => return false,
+            },
+        }
+
+        // Add `closer_peers` to the iterator
+        for key in closer_peers.into_iter() {
+            let distance = self.target.distance(&key);
+            let new_peer = Peer {
+                key,
+                state: PeerState::NotContacted,
+            };
+
+            self.closest_peers.entry(distance).or_insert(new_peer);
+        }
+
+        // Set new iterator state, check if iteration stalled based on
+        // the `ALPHA_VALUE` (Parallelism) and if the iterator made progres
+        // self.state = match self.state {
+        //     PeersIterState::Iterating {
+        //     }
+        // }
+        true
     }
 
     pub fn next(&mut self) -> QueryState {
@@ -182,7 +213,7 @@ impl PeersIter {
 
         let mut result_counter = 0;
 
-        for peer in self.closest_peers.iter_mut() {
+        for peer in self.closest_peers.values_mut() {
             match peer.state {
                 PeerState::NotContacted => {
                     // TODO: check if 'self.num_waiting' is below some maximum
@@ -192,7 +223,7 @@ impl PeersIter {
                     return QueryState::Waiting(Some(peer.key.clone()));
                 }
                 PeerState::Waiting => {
-                    // TODO: check for timeout
+                    // TODO: check for timeout, set to unresponsive
                 }
                 PeerState::Succeeded => {
                     result_counter += 1;
@@ -207,6 +238,7 @@ impl PeersIter {
         }
 
         if self.num_waiting > 0 {
+            // The iterator is still waiting for some peers to respond or to timeout
             QueryState::Waiting(None)
         } else {
             self.state = PeersIterState::Finished;

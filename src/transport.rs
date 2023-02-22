@@ -3,7 +3,7 @@ use multiaddr::{Multiaddr, Protocol};
 use socket2::{Domain, Socket, Type};
 use std::{
     io,
-    net::{self, SocketAddr},
+    net::SocketAddr,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -95,7 +95,6 @@ impl Transport {
             socket.set_only_v6(true)?;
         }
         socket.set_nodelay(true)?;
-        // socket.set_nonblocking(true).unwrap();
 
         Ok(socket)
     }
