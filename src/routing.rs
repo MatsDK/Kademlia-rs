@@ -100,6 +100,23 @@ impl RoutingTable {
 
         closest
     }
+
+    pub fn get_addr(&self, peer: &Key) -> Option<&Multiaddr> {
+        let d = self.local_key.distance(peer);
+        let bucket_idx = BucketIndex::new(&d);
+
+        if let Some(i) = bucket_idx {
+            let bucket = &self.kbuckets[i.index()];
+
+            return bucket
+                .nodes
+                .iter()
+                .find(|(key, _)| key == peer)
+                .map(|(_, a)| a);
+        }
+
+        None
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

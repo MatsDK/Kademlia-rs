@@ -48,7 +48,20 @@ impl KademliaNode {
         let addr = addr.into();
         let stream = self.transport.dial(&addr).await.unwrap();
 
-        self.pool.add_outgoing(stream, addr).await;
+        self.pool.add_outgoing(stream, addr);
+
+        Ok(())
+    }
+
+    pub async fn dial_with_peer_id(&mut self, peer: Key) -> io::Result<()> {
+        let addr = self.routing_table.get_addr(&peer);
+        if let Some(addr) = addr {
+            let stream = self.transport.dial(addr).await.unwrap();
+
+            self.pool.add_outgoing(stream, addr.clone());
+        } else {
+            eprintln!("There is no addr in routing table for {peer}")
+        }
 
         Ok(())
     }
@@ -156,7 +169,9 @@ impl KademliaNode {
         match ev {
             NodeEvent::Dial { peer_id } => {
                 println!("dial {}", peer_id);
-                // TODO: dial the peer
+                // TODO: Make dialing not return future
+
+                // self.dial_with_peer_id(peer_id).await;
             }
             NodeEvent::Notify { peer_id, event } => {
                 assert!(self.pending_event.is_none());

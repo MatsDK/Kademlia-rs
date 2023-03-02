@@ -55,7 +55,7 @@ impl Pool {
         ));
     }
 
-    pub async fn add_outgoing(&mut self, stream: TcpStream, remote_addr: Multiaddr) {
+    pub fn add_outgoing(&mut self, stream: TcpStream, remote_addr: Multiaddr) {
         let socket_addr = multiaddr_to_socketaddr(remote_addr).unwrap();
         tokio::spawn(pending_outgoing(
             stream,
