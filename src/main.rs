@@ -34,7 +34,7 @@ async fn main() -> io::Result<()> {
     let mut node = KademliaNode::new(key, addr).await?;
 
     if let Some(dial) = dial {
-        node.dial(dial).await?;
+        node.dial(dial).unwrap();
         // node.add_address(&key, addr);
         // node.boostrap(dial).await?;
     }

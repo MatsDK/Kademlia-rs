@@ -1,14 +1,22 @@
 use arrayvec::ArrayVec;
 use multiaddr::Multiaddr;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     key::{Distance, Key},
     K_VALUE,
 };
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Node {
+    pub key: Key,
+    pub addr: Multiaddr,
+}
+
 #[derive(Debug)]
 struct KBucket {
-    nodes: ArrayVec<(Key, Multiaddr), { K_VALUE }>,
+    // nodes: ArrayVec<(Key, Multiaddr), { K_VALUE }>,
+    nodes: ArrayVec<Node, { K_VALUE }>,
 }
 
 impl KBucket {
@@ -19,7 +27,14 @@ impl KBucket {
     }
 
     fn get_keys(&self) -> Vec<Key> {
-        self.nodes.iter().map(|(key, _)| key.clone()).collect()
+        self.nodes
+            .iter()
+            .map(|Node { key, .. }| key.clone())
+            .collect()
+    }
+
+    fn get_nodes(&self) -> Vec<Node> {
+        self.nodes.to_vec()
     }
 }
 
@@ -49,13 +64,16 @@ impl RoutingTable {
                 return;
             }
 
-            bucket.nodes.push((target.clone(), addr));
+            bucket.nodes.push(Node {
+                key: target.clone(),
+                addr,
+            });
         } else {
             eprintln!("SelfEntry");
         }
     }
 
-    pub fn closest_nodes(&mut self, target: &Key) -> Vec<Key> {
+    pub fn closest_nodes(&mut self, target: &Key) -> Vec<Node> {
         let mut closest = Vec::new();
 
         let d = self.local_key.distance(target);
@@ -68,12 +86,12 @@ impl RoutingTable {
 
         let index = bucket_idx.unwrap().index();
 
-        closest.append(&mut self.kbuckets[index].get_keys());
+        closest.append(&mut self.kbuckets[index].get_nodes());
 
         // Look for the closest on the left if less than K closest found
         if closest.len() < K_VALUE {
             for i in (0..index).rev() {
-                closest.append(&mut self.kbuckets[i].get_keys());
+                closest.append(&mut self.kbuckets[i].get_nodes());
                 if closest.len() >= K_VALUE {
                     break;
                 }
@@ -83,7 +101,7 @@ impl RoutingTable {
         // Now look for the closest on the right if less than K closest found
         if closest.len() < K_VALUE {
             for i in (index + 1)..256 {
-                closest.append(&mut self.kbuckets[i].get_keys());
+                closest.append(&mut self.kbuckets[i].get_nodes());
                 if closest.len() >= K_VALUE {
                     break;
                 }
@@ -92,7 +110,7 @@ impl RoutingTable {
 
         // Sort by distance to local_key
         // closest.sort_by(|a, b| self.local_key.distance(a).cmp(&self.local_key.distance(b)));
-        closest.sort_by_key(|a| self.local_key.distance(a));
+        closest.sort_by_key(|Node { key, .. }| self.local_key.distance(key));
 
         if closest.len() > K_VALUE {
             return closest[..K_VALUE].to_vec();
@@ -111,8 +129,8 @@ impl RoutingTable {
             return bucket
                 .nodes
                 .iter()
-                .find(|(key, _)| key == peer)
-                .map(|(_, a)| a);
+                .find(|Node { key, .. }| key == peer)
+                .map(|Node { addr, .. }| addr);
         }
 
         None

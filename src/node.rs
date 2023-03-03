@@ -12,7 +12,7 @@ use crate::{
     key::Key,
     pool::{Pool, PoolEvent},
     query::{QueryPool, QueryPoolState},
-    routing::RoutingTable,
+    routing::{Node, RoutingTable},
     transport::{socketaddr_to_multiaddr, Transport, TransportEvent},
 };
 
@@ -44,26 +44,50 @@ impl KademliaNode {
         })
     }
 
-    pub async fn dial(&mut self, addr: impl Into<Multiaddr>) -> io::Result<()> {
+    pub fn dial(&mut self, addr: impl Into<Multiaddr>) -> Result<(), String> {
         let addr = addr.into();
-        let stream = self.transport.dial(&addr).await.unwrap();
+        let dial = match self.transport.dial(&addr) {
+            Err(e) => {
+                eprintln!("{}", e);
+                return Err(e);
+            }
+            Ok(dial) => dial,
+        };
 
-        self.pool.add_outgoing(stream, addr);
+        self.pool.add_outgoing(dial, addr);
 
         Ok(())
     }
 
-    pub async fn dial_with_peer_id(&mut self, peer: Key) -> io::Result<()> {
-        let addr = self.routing_table.get_addr(&peer);
+    pub fn dial_with_peer_id(&mut self, peer: Key) -> Result<(), String> {
+        let addr = self.find_addr_for_peer(&peer);
         if let Some(addr) = addr {
-            let stream = self.transport.dial(addr).await.unwrap();
+            let dial = match self.transport.dial(&addr) {
+                Err(e) => {
+                    eprintln!("{}", e);
+                    return Err(e);
+                }
+                Ok(dial) => dial,
+            };
 
-            self.pool.add_outgoing(stream, addr.clone());
+            self.pool.add_outgoing(dial, addr.clone());
         } else {
             eprintln!("There is no addr in routing table for {peer}")
         }
 
         Ok(())
+    }
+
+    pub fn find_addr_for_peer(&self, peer: &Key) -> Option<&Multiaddr> {
+        // Check if there is an address for the peer returned in an ongoing query.
+        for query in self.queries.iter() {
+            if let Some(addr) = query.get_addr_for_peer(peer) {
+                return Some(addr);
+            }
+        }
+
+        // Otherwise, check if the address is already in the routing table.
+        self.routing_table.get_addr(peer)
     }
 
     pub async fn boostrap(&mut self) -> io::Result<()> {
@@ -137,7 +161,7 @@ impl KademliaNode {
                 closest_nodes,
                 request_id,
             } => {
-                println!("response");
+                println!("response {:?}", closest_nodes);
                 let local_key = self.local_key().clone();
 
                 if let Some(query) = self.queries.get_mut(&request_id) {
@@ -155,6 +179,19 @@ impl KademliaNode {
                 self.add_address(&key, endpoint);
                 self.connected_peers.insert(key.clone());
 
+                // Once the connection is established send all the queued events to that peer.
+                for event in self
+                    .queries
+                    .iter_mut()
+                    .filter_map(|q| q.get_waiting_events(&key))
+                    .flatten()
+                {
+                    self.queued_events.push_back(NodeEvent::Notify {
+                        peer_id: key.clone(),
+                        event,
+                    });
+                }
+
                 let out_ev = OutEvent::ConnectionEstablished(key);
                 return Some(NodeEvent::GenerateEvent(out_ev));
             }
@@ -168,10 +205,7 @@ impl KademliaNode {
     fn handle_query_pool_event(&mut self, ev: NodeEvent) -> Option<NodeEvent> {
         match ev {
             NodeEvent::Dial { peer_id } => {
-                println!("dial {}", peer_id);
-                // TODO: Make dialing not return future
-
-                // self.dial_with_peer_id(peer_id).await;
+                self.dial_with_peer_id(peer_id).unwrap();
             }
             NodeEvent::Notify { peer_id, event } => {
                 assert!(self.pending_event.is_none());
@@ -207,6 +241,8 @@ impl KademliaNode {
                                 event: q.get_event(),
                             });
                         } else {
+                            let ev = q.get_event();
+                            q.waiting_events.entry(key.clone()).or_default().push(ev);
                             self.queued_events
                                 .push_back(NodeEvent::Dial { peer_id: key })
                         }
@@ -307,7 +343,7 @@ pub enum KademliaEvent {
         request_id: usize,
     },
     FindNodeRes {
-        closest_nodes: Vec<Key>,
+        closest_nodes: Vec<Node>,
         request_id: usize,
     },
     Ping {

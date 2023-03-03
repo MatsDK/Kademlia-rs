@@ -7,7 +7,7 @@ use std::{io, net::SocketAddr};
 
 use crate::key::Key;
 use crate::node::KademliaEvent;
-use crate::transport::{multiaddr_to_socketaddr, TcpStream};
+use crate::transport::{multiaddr_to_socketaddr, Dial, TcpStream};
 
 #[derive(Debug)]
 pub struct Connection {
@@ -55,10 +55,10 @@ impl Pool {
         ));
     }
 
-    pub fn add_outgoing(&mut self, stream: TcpStream, remote_addr: Multiaddr) {
+    pub fn add_outgoing(&mut self, dial: Dial, remote_addr: Multiaddr) {
         let socket_addr = multiaddr_to_socketaddr(remote_addr).unwrap();
         tokio::spawn(pending_outgoing(
-            stream,
+            dial,
             socket_addr,
             self.pending_connections_tx.clone(),
             self.local_key.clone(),
@@ -189,11 +189,19 @@ impl EstablishedConnection {
 }
 
 async fn pending_outgoing(
-    mut stream: TcpStream,
+    dial: Dial,
     remote_addr: SocketAddr,
     mut event_sender: mpsc::Sender<PendingConnectionEvent>,
     local_key: Key,
 ) {
+    let mut stream = match dial.await {
+        Err(e) => {
+            eprintln!("Error occured while connection to {remote_addr} in dial");
+            return;
+        }
+        Ok(s) => s,
+    };
+
     let ev = KademliaEvent::Ping { target: local_key };
     let ev = bincode::serialize(&ev).unwrap();
     stream.write_all(&ev).await.unwrap();

@@ -3,7 +3,7 @@ use multiaddr::{Multiaddr, Protocol};
 use socket2::{Domain, Socket, Type};
 use std::{
     io,
-    net::SocketAddr,
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     pin::Pin,
     task::{Context, Poll},
 };
@@ -12,7 +12,10 @@ use tokio::net::TcpListener;
 #[derive(Debug)]
 pub struct Transport {
     listener: TcpListenStream,
+    local_addr: SocketAddr,
 }
+
+pub type Dial = Pin<Box<dyn Future<Output = Result<TcpStream, io::Error>> + Send>>;
 
 // TODO: refactor error handling, remove unwraps
 impl Transport {
@@ -28,10 +31,14 @@ impl Transport {
             listener: tcp_listener,
         };
 
-        Ok(Self { listener })
+        Ok(Self {
+            listener,
+            local_addr: socket_addr,
+        })
     }
 
-    pub async fn dial(&self, addr: &Multiaddr) -> Result<TcpStream, String> {
+    // pub async fn dial(&self, addr: &Multiaddr) -> Result<TcpStream, String> {
+    pub fn dial(&self, addr: &Multiaddr) -> Result<Dial, String> {
         let socket_addr = if let Ok(sa) = multiaddr_to_socketaddr(addr.clone()) {
             sa
         } else {
@@ -40,47 +47,39 @@ impl Transport {
 
         let socket = self.create_socket(&socket_addr).unwrap();
 
+        // Make sure that dialing happends on the same port
+        // TODO: check if this is the right way to make it work
+        socket.set_reuse_address(true).unwrap();
+        let port = self.local_addr.port();
+        let dial_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port);
+        socket.bind(&dial_addr.into()).unwrap();
+
         // Set socket to nonblocking mode, this way the individual connnection
         // threads will not block and prevent themselves from receiving commands.
         socket.set_nonblocking(true).unwrap();
 
-        //     let dial_fut = Ok(async move {
-        //         match socket.connect(&socket_addr.into()) {
-        //             Ok(()) => {}
-        //             Err(err) if err.raw_os_error() == Some(libc::EINPROGRESS) => {}
-        //             Err(err) if err.kind() == io::ErrorKind::WouldBlock => {}
-        //             Err(err) => return Err(err),
-        //         }
+        // Only open connection when this future is called,
+        // because a future is returned `self.dial` is not async
+        Ok(async move {
+            match socket.connect(&socket_addr.into()) {
+                Ok(()) => {}
+                Err(err) if err.raw_os_error() == Some(libc::EINPROGRESS) => {}
+                Err(err) if err.kind() == io::ErrorKind::WouldBlock => {}
+                Err(err) => return Err(err),
+            }
 
-        //         let s: std::net::TcpStream = socket.into();
-        //         let stream = tokio::net::TcpStream::try_from(s).unwrap();
+            let s: std::net::TcpStream = socket.into();
+            let stream = tokio::net::TcpStream::try_from(s).unwrap();
 
-        //         stream.writable().await.unwrap();
+            stream.writable().await.unwrap();
 
-        //         if let Some(e) = stream.take_error()? {
-        //             return Err(e);
-        //         }
+            if let Some(e) = stream.take_error()? {
+                return Err(e);
+            }
 
-        //         Ok(TcpStream(stream))
-        //     }.boxed());
-
-        match socket.connect(&socket_addr.into()) {
-            Ok(()) => {}
-            Err(err) if err.raw_os_error() == Some(libc::EINPROGRESS) => {}
-            Err(err) if err.kind() == io::ErrorKind::WouldBlock => {}
-            Err(err) => return Err(err.to_string()),
+            Ok(TcpStream(stream))
         }
-
-        let s: std::net::TcpStream = socket.into();
-        let stream = tokio::net::TcpStream::try_from(s).unwrap();
-
-        stream.writable().await.unwrap();
-
-        if let Some(e) = stream.take_error().unwrap() {
-            return Err(e.to_string());
-        }
-
-        Ok(TcpStream(stream))
+        .boxed())
     }
 
     fn create_socket(&self, socket_addr: &SocketAddr) -> io::Result<Socket> {

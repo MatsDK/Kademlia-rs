@@ -1,14 +1,17 @@
 use std::collections::{btree_map::Entry, BTreeMap, HashMap};
 
+use multiaddr::Multiaddr;
+
 use crate::{
     key::{Distance, Key},
     node::KademliaEvent,
+    routing::Node,
     K_VALUE,
 };
 
 #[derive(Debug)]
 pub enum QueryPoolState<'a> {
-    Waiting(Option<(&'a Query, Key)>),
+    Waiting(Option<(&'a mut Query, Key)>),
     Finished(Query),
     Idle,
 }
@@ -27,12 +30,17 @@ impl QueryPool {
         }
     }
 
-    pub fn add_query(&mut self, target: Key, peers: Vec<Key>, query_id: usize, ev: KademliaEvent) {
+    pub fn add_query(&mut self, target: Key, peers: Vec<Node>, query_id: usize, ev: KademliaEvent) {
         if peers.is_empty() {
             return;
         }
 
-        let peers_iter = PeersIter::new(target, peers);
+        let peer_keys = peers
+            .into_iter()
+            .map(|Node { key, .. }| key)
+            .collect::<Vec<_>>();
+
+        let peers_iter = PeersIter::new(target, peer_keys);
         let query = Query::new(peers_iter, ev, query_id);
         self.queries.insert(query_id, query);
     }
@@ -45,6 +53,14 @@ impl QueryPool {
 
     pub fn get_mut(&mut self, query_id: &usize) -> Option<&mut Query> {
         self.queries.get_mut(query_id)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Query> {
+        self.queries.values()
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Query> {
+        self.queries.values_mut()
     }
 
     pub fn poll(&mut self) -> QueryPoolState<'_> {
@@ -96,6 +112,9 @@ pub struct Query {
     peers_iter: PeersIter,
     event: KademliaEvent,
     id: usize,
+    discovered_addrs: HashMap<Key, Multiaddr>,
+    // pub waiting_events: Vec<(Key, KademliaEvent)>
+    pub waiting_events: HashMap<Key, Vec<KademliaEvent>>,
 }
 
 impl Query {
@@ -104,6 +123,8 @@ impl Query {
             peers_iter,
             event,
             id: query_id,
+            discovered_addrs: Default::default(),
+            waiting_events: Default::default(),
         }
     }
 
@@ -115,11 +136,25 @@ impl Query {
         self.event.clone()
     }
 
-    pub fn on_success(&mut self, peer: &Key, closer_peers: Vec<Key>, local_key: Key) {
+    pub fn get_addr_for_peer(&self, peer: &Key) -> Option<&Multiaddr> {
+        self.discovered_addrs.get(peer)
+    }
+
+    pub fn get_waiting_events(&mut self, peer: &Key) -> Option<Vec<KademliaEvent>> {
+        self.waiting_events.remove(peer)
+    }
+
+    pub fn on_success(&mut self, peer: &Key, closer_peers: Vec<Node>, local_key: Key) {
         let other_peers = closer_peers
             .into_iter()
-            .filter(|p| p != &local_key)
+            .filter(|Node { key, .. }| key != &local_key)
+            .map(|Node { key, addr }| {
+                // TODO: use entry
+                self.discovered_addrs.insert(key.clone(), addr);
+                key
+            })
             .collect();
+
         self.peers_iter.on_success(peer, other_peers);
     }
 
