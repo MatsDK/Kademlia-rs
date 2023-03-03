@@ -59,7 +59,7 @@ impl RoutingTable {
         if let Some(i) = bucket_idx {
             let bucket = &mut self.kbuckets[i.index()];
 
-            // If the bucket is full we should check if there is a disconnected node
+            // TODO: If the bucket is full we should check if there is a disconnected node
             if bucket.nodes.is_full() {
                 return;
             }

@@ -10,12 +10,6 @@ use crate::node::KademliaEvent;
 use crate::transport::{multiaddr_to_socketaddr, Dial, TcpStream};
 
 #[derive(Debug)]
-pub struct Connection {
-    remote_addr: SocketAddr,
-    stream: TcpStream,
-}
-
-#[derive(Debug)]
 pub struct EstablishedConnection {
     endpoint: SocketAddr,
     sender: mpsc::Sender<KademliaEvent>,
@@ -81,7 +75,7 @@ impl Pool {
         }
 
         loop {
-            // Check if any pending connection made progress.
+            // Check if a pending connection made progress.
             let event = match self.pending_connections_rx.poll_next_unpin(cx) {
                 Poll::Ready(Some(ev)) => ev,
                 Poll::Ready(None) => unreachable!("Got None in poll_next_unpin"),
@@ -128,6 +122,12 @@ impl Pool {
 
         Poll::Pending
     }
+}
+
+#[derive(Debug)]
+pub struct Connection {
+    remote_addr: SocketAddr,
+    stream: TcpStream,
 }
 
 impl Connection {
@@ -183,6 +183,7 @@ impl EstablishedConnection {
         }
     }
 
+    // This will return `None` if the sender does not have enough capacity to receive a message.
     pub fn poll_ready_notify_handler(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), ()>> {
         self.sender.poll_ready(cx).map_err(|_| ())
     }

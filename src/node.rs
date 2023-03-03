@@ -90,7 +90,7 @@ impl KademliaNode {
         self.routing_table.get_addr(peer)
     }
 
-    pub async fn boostrap(&mut self) -> io::Result<()> {
+    pub fn bootstrap(&mut self) -> io::Result<()> {
         let local_key = self.routing_table.local_key.clone();
 
         let peers = self.routing_table.closest_nodes(&local_key);

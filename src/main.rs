@@ -36,7 +36,7 @@ async fn main() -> io::Result<()> {
     if let Some(dial) = dial {
         node.dial(dial).unwrap();
         // node.add_address(&key, addr);
-        // node.boostrap(dial).await?;
+        // node.bootstrap().unwrap();
     }
 
     let mut reader = BufReader::new(stdin()).lines();

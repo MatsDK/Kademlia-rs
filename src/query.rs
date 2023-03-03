@@ -113,7 +113,6 @@ pub struct Query {
     event: KademliaEvent,
     id: usize,
     discovered_addrs: HashMap<Key, Multiaddr>,
-    // pub waiting_events: Vec<(Key, KademliaEvent)>
     pub waiting_events: HashMap<Key, Vec<KademliaEvent>>,
 }
 
@@ -149,7 +148,6 @@ impl Query {
             .into_iter()
             .filter(|Node { key, .. }| key != &local_key)
             .map(|Node { key, addr }| {
-                // TODO: use entry
                 self.discovered_addrs.insert(key.clone(), addr);
                 key
             })
