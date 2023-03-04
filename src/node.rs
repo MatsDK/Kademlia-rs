@@ -11,7 +11,7 @@ use std::{
 use crate::{
     key::Key,
     pool::{Pool, PoolEvent},
-    query::{QueryPool, QueryPoolState},
+    query::{Query, QueryPool, QueryPoolState},
     routing::{Node, RoutingTable},
     transport::{socketaddr_to_multiaddr, Transport, TransportEvent},
 };
@@ -161,7 +161,6 @@ impl KademliaNode {
                 closest_nodes,
                 request_id,
             } => {
-                println!("response {:?}", closest_nodes);
                 let local_key = self.local_key().clone();
 
                 if let Some(query) = self.queries.get_mut(&request_id) {
@@ -217,6 +216,26 @@ impl KademliaNode {
         None
     }
 
+    fn query_finished(&self, query: Query) -> Option<NodeEvent> {
+        match query.get_event() {
+            KademliaEvent::FindNodeReq { target, .. } => {
+                let peers = query.get_peers();
+
+                let out_ev = OutEvent::OutBoundQueryProgressed {
+                    result: QueryResult::FindNode {
+                        target,
+                        nodes: peers,
+                    },
+                };
+                return Some(NodeEvent::GenerateEvent(out_ev));
+            }
+            _ => {
+                eprintln!("Should not get this in query_finished: {:?}", query);
+            }
+        };
+        None
+    }
+
     fn poll_next_query(&mut self, cx: &mut Context<'_>) -> Poll<NodeEvent> {
         loop {
             // first get all the queued events from previous iterations
@@ -228,11 +247,9 @@ impl KademliaNode {
                 // poll the queries handler
                 match self.queries.poll() {
                     QueryPoolState::Finished(q) => {
-                        // TODO: match different query results
-                        let out_ev = OutEvent::OutBoundQueryProgressed {
-                            result: QueryResult::FindNode { nodes: vec![] },
+                        if let Some(e) = self.query_finished(q) {
+                            return Poll::Ready(e);
                         };
-                        return Poll::Ready(NodeEvent::GenerateEvent(out_ev));
                     }
                     QueryPoolState::Waiting(Some((q, key))) => {
                         if self.connected_peers.contains(&key) {
@@ -367,5 +384,5 @@ pub enum OutEvent {
 
 #[derive(Debug, Clone)]
 pub enum QueryResult {
-    FindNode { nodes: Vec<Key> },
+    FindNode { nodes: Vec<Key>, target: Key },
 }

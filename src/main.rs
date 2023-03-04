@@ -12,7 +12,7 @@ mod routing;
 mod transport;
 
 use crate::key::Key;
-use crate::node::{KademliaNode, OutEvent};
+use crate::node::{KademliaNode, OutEvent, QueryResult};
 
 pub const K_VALUE: usize = 4;
 
@@ -53,7 +53,14 @@ async fn main() -> io::Result<()> {
                         println!("> Connection established: {}", peer_id);
                     }
                     OutEvent::OutBoundQueryProgressed {result} => {
-                        println!("> Query progressed: {:?}", result);
+                        match result {
+                            QueryResult::FindNode { nodes, target } => {
+                                println!("> Found closest peers to {target}");
+                                for node in nodes {
+                                    println!("\t{node}");
+                                }
+                            }
+                        }
                     }
                     OutEvent::Other => {}
                 }

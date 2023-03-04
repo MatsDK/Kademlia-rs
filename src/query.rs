@@ -143,6 +143,10 @@ impl Query {
         self.waiting_events.remove(peer)
     }
 
+    pub fn get_peers(self) -> Vec<Key> {
+        self.peers_iter.get_peers()
+    }
+
     pub fn on_success(&mut self, peer: &Key, closer_peers: Vec<Node>, local_key: Key) {
         let other_peers = closer_peers
             .into_iter()
@@ -196,6 +200,20 @@ impl PeersIter {
             num_waiting: 0,
             num_results: K_VALUE,
         }
+    }
+
+    pub fn get_peers(self) -> Vec<Key> {
+        self.closest_peers
+            .into_iter()
+            .filter_map(|(_, peer)| {
+                if let PeerState::Succeeded = peer.state {
+                    Some(peer.key)
+                } else {
+                    None
+                }
+            })
+            .take(self.num_results)
+            .collect()
     }
 
     pub fn on_success(&mut self, peer_id: &Key, closer_peers: Vec<Key>) -> bool {
