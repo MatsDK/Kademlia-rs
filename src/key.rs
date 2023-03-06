@@ -1,7 +1,7 @@
-use core_::{borrow::Borrow, fmt};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use sha2::{digest::generic_array::GenericArray, Digest, Sha256};
+use std::{borrow::Borrow, fmt, str::FromStr};
 use uint::*;
 
 // #[derive(Clone, Debug)]
@@ -35,6 +35,16 @@ impl Key {
         let b = U256::from(other.0.as_slice());
 
         Distance(a ^ b)
+    }
+}
+
+impl FromStr for Key {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let bytes = s.as_bytes();
+        let key = Key(Sha256::digest(s.as_bytes()).into());
+        Ok(key)
     }
 }
 

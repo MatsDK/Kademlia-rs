@@ -17,16 +17,23 @@ pub struct Transport {
 
 pub type Dial = Pin<Box<dyn Future<Output = Result<TcpStream, io::Error>> + Send>>;
 
-// TODO: refactor error handling, remove unwraps
+#[derive(Debug)]
+pub enum TransportError {
+    InvalidMultiaddr,
+    Other(io::Error),
+}
+
 impl Transport {
-    pub async fn new(addr: &Multiaddr) -> Result<Self, String> {
+    pub async fn new(addr: &Multiaddr) -> Result<Self, TransportError> {
         let socket_addr = if let Ok(sa) = multiaddr_to_socketaddr(addr.clone()) {
             sa
         } else {
-            return Err("Multiaddr not supported".to_string());
+            return Err(TransportError::InvalidMultiaddr);
         };
 
-        let tcp_listener = TcpListener::bind(&socket_addr).await.unwrap();
+        let tcp_listener = TcpListener::bind(&socket_addr)
+            .await
+            .map_err(TransportError::Other)?;
         let listener = TcpListenStream {
             listener: tcp_listener,
         };
@@ -38,25 +45,32 @@ impl Transport {
     }
 
     // pub async fn dial(&self, addr: &Multiaddr) -> Result<TcpStream, String> {
-    pub fn dial(&self, addr: &Multiaddr) -> Result<Dial, String> {
+    pub fn dial(&self, addr: &Multiaddr) -> Result<Dial, TransportError> {
         let socket_addr = if let Ok(sa) = multiaddr_to_socketaddr(addr.clone()) {
             sa
         } else {
-            return Err("Invalid socket address".to_string());
+            return Err(TransportError::InvalidMultiaddr);
         };
 
-        let socket = self.create_socket(&socket_addr).unwrap();
+        let socket = self
+            .create_socket(&socket_addr)
+            .map_err(TransportError::Other)?;
 
-        // Make sure that dialing happends on the same port
-        // TODO: check if this is the right way to make it work
-        socket.set_reuse_address(true).unwrap();
+        // Make sure that dialing happends on the same port as listening
+        socket
+            .set_reuse_address(true)
+            .map_err(TransportError::Other)?;
         let port = self.local_addr.port();
         let dial_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port);
-        socket.bind(&dial_addr.into()).unwrap();
+        socket
+            .bind(&dial_addr.into())
+            .map_err(TransportError::Other)?;
 
         // Set socket to nonblocking mode, this way the individual connnection
         // threads will not block and prevent themselves from receiving commands.
-        socket.set_nonblocking(true).unwrap();
+        socket
+            .set_nonblocking(true)
+            .map_err(TransportError::Other)?;
 
         // Only open connection when this future is called,
         // because a future is returned `self.dial` is not async
@@ -69,9 +83,9 @@ impl Transport {
             }
 
             let s: std::net::TcpStream = socket.into();
-            let stream = tokio::net::TcpStream::try_from(s).unwrap();
+            let stream = tokio::net::TcpStream::try_from(s)?;
 
-            stream.writable().await.unwrap();
+            stream.writable().await?;
 
             if let Some(e) = stream.take_error()? {
                 return Err(e);

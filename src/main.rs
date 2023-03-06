@@ -2,6 +2,7 @@ use clap::Parser;
 use futures::StreamExt;
 use multiaddr::Multiaddr;
 use std::io;
+use std::str::FromStr;
 use tokio::io::{stdin, AsyncBufReadExt, BufReader};
 
 mod key;
@@ -15,6 +16,7 @@ use crate::key::Key;
 use crate::node::{KademliaNode, OutEvent, QueryResult};
 
 pub const K_VALUE: usize = 4;
+static BOOTSTRAP_NODE_KEY: &str = "JA73AGTSG3bhqKuEYc2LdsyQLJafQoGrDvzh5q433qDi";
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -29,23 +31,35 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    let key = Key::random();
     let Args { addr, dial } = Args::parse();
+
+    let key = if let Some(_) = dial {
+        Key::random()
+    } else {
+        Key::from_str(BOOTSTRAP_NODE_KEY).unwrap()
+    };
+
     let mut node = KademliaNode::new(key, addr).await?;
 
     if let Some(dial) = dial {
-        node.dial(dial).unwrap();
-        // node.add_address(&key, addr);
-        // node.bootstrap().unwrap();
+        let key = Key::from_str(BOOTSTRAP_NODE_KEY).unwrap();
+        println!("dialing {key} on {dial:?}");
+        node.add_address(&key, dial);
+        node.bootstrap().unwrap();
     }
 
     let mut reader = BufReader::new(stdin()).lines();
 
     loop {
         tokio::select! {
-            Ok(Some(_line)) = reader.next_line() => {
-                let key = Key::random();
-                node.find_node(&key);
+            Ok(Some(line)) = reader.next_line() => {
+                match line.as_str() {
+                    "FIND_NODE" => {
+                        let key = Key::random();
+                        node.find_node(&key);
+                    }
+                    _ => {}
+                }
             }
             ev = node.select_next_some() => {
                 match ev {
@@ -55,7 +69,7 @@ async fn main() -> io::Result<()> {
                     OutEvent::OutBoundQueryProgressed {result} => {
                         match result {
                             QueryResult::FindNode { nodes, target } => {
-                                println!("> Found closest peers to {target}");
+                                println!("> Found nodes closest to {target}");
                                 for node in nodes {
                                     println!("\t{node}");
                                 }

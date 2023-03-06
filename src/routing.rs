@@ -77,11 +77,12 @@ impl RoutingTable {
         let mut closest = Vec::new();
 
         let d = self.local_key.distance(target);
-        let bucket_idx = BucketIndex::new(&d);
+        let mut bucket_idx = BucketIndex::new(&d);
 
         if bucket_idx.is_none() {
             eprintln!("SelfEntry");
-            return closest;
+            bucket_idx = Some(BucketIndex(0));
+            // return closest;
         }
 
         let index = bucket_idx.unwrap().index();

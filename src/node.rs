@@ -44,12 +44,12 @@ impl KademliaNode {
         })
     }
 
-    pub fn dial(&mut self, addr: impl Into<Multiaddr>) -> Result<(), String> {
+    pub fn dial(&mut self, addr: impl Into<Multiaddr>) -> Result<(), ()> {
         let addr = addr.into();
         let dial = match self.transport.dial(&addr) {
             Err(e) => {
-                eprintln!("{}", e);
-                return Err(e);
+                eprintln!("{:?}", e);
+                return Err(());
             }
             Ok(dial) => dial,
         };
@@ -59,13 +59,13 @@ impl KademliaNode {
         Ok(())
     }
 
-    pub fn dial_with_peer_id(&mut self, peer: Key) -> Result<(), String> {
+    pub fn dial_with_peer_id(&mut self, peer: Key) -> Result<(), ()> {
         let addr = self.find_addr_for_peer(&peer);
         if let Some(addr) = addr {
             let dial = match self.transport.dial(&addr) {
                 Err(e) => {
-                    eprintln!("{}", e);
-                    return Err(e);
+                    eprintln!("{:?}", e);
+                    return Err(());
                 }
                 Ok(dial) => dial,
             };
@@ -204,7 +204,9 @@ impl KademliaNode {
     fn handle_query_pool_event(&mut self, ev: NodeEvent) -> Option<NodeEvent> {
         match ev {
             NodeEvent::Dial { peer_id } => {
-                self.dial_with_peer_id(peer_id).unwrap();
+                if let Ok(()) = self.dial_with_peer_id(peer_id) {
+                    // return NodeEvent::Dialing
+                }
             }
             NodeEvent::Notify { peer_id, event } => {
                 assert!(self.pending_event.is_none());
