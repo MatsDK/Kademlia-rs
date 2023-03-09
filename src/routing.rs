@@ -8,9 +8,16 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum NodeStatus {
+    Connected,
+    Disconnected,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Node {
     pub key: Key,
     pub addr: Multiaddr,
+    pub status: NodeStatus,
 }
 
 #[derive(Debug)]
@@ -67,6 +74,7 @@ impl RoutingTable {
             bucket.nodes.push(Node {
                 key: target.clone(),
                 addr,
+                status: NodeStatus::Connected,
             });
         } else {
             eprintln!("SelfEntry");
@@ -80,7 +88,7 @@ impl RoutingTable {
         let mut bucket_idx = BucketIndex::new(&d);
 
         if bucket_idx.is_none() {
-            eprintln!("SelfEntry");
+            eprintln!("Self lookup");
             bucket_idx = Some(BucketIndex(0));
             // return closest;
         }

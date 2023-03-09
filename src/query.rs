@@ -151,7 +151,7 @@ impl Query {
         let other_peers = closer_peers
             .into_iter()
             .filter(|Node { key, .. }| key != &local_key)
-            .map(|Node { key, addr }| {
+            .map(|Node { key, addr, .. }| {
                 self.discovered_addrs.insert(key.clone(), addr);
                 key
             })

@@ -1,5 +1,5 @@
 use futures::channel::mpsc;
-use futures::{AsyncReadExt, AsyncWriteExt, Future, FutureExt, SinkExt, StreamExt};
+use futures::{AsyncReadExt, AsyncWriteExt, SinkExt, StreamExt};
 use multiaddr::Multiaddr;
 use std::collections::HashMap;
 use std::task::{Context, Poll};
@@ -68,7 +68,13 @@ impl Pool {
         match self.established_connections_rx.poll_next_unpin(cx) {
             Poll::Pending => {}
             Poll::Ready(None) => {}
-            Poll::Ready(Some(EstablishedConnectionEvent::Error(e))) => {}
+            Poll::Ready(Some(EstablishedConnectionEvent::Error(_error))) => {}
+            Poll::Ready(Some(EstablishedConnectionEvent::Closed { key, error })) => {
+                self.connections
+                    .remove(&key)
+                    .expect("Connection is established");
+                return Poll::Ready(PoolEvent::ConnectionClosed { key, error });
+            }
             Poll::Ready(Some(EstablishedConnectionEvent::Event { key, event })) => {
                 return Poll::Ready(PoolEvent::Request { key, event })
             }
@@ -139,7 +145,6 @@ impl Connection {
             let bytes_read = match bytes_read {
                 Ok(b) => b,
                 Err(e) => {
-                    eprint!("Error reading stream: {}", e);
                     return Poll::Ready(Err("Error reading stream".to_string()));
                 }
             };
@@ -313,11 +318,11 @@ async fn established_connection(
                     Poll::Ready(Ok(event)) => {
                         event_sender.send(EstablishedConnectionEvent::Event { event, key: key.clone() }).await.unwrap();
                     }
-                    Poll::Ready(Err(e)) => {
+                    Poll::Ready(Err(error)) => {
                         command_receiver.close();
 
                         event_sender.send(
-                            EstablishedConnectionEvent::Error(io::Error::new(io::ErrorKind::Other, e))
+                            EstablishedConnectionEvent::Closed { key, error }
                         ).await.unwrap();
 
                         return
@@ -344,6 +349,7 @@ pub enum PendingConnectionEvent {
 #[derive(Debug)]
 pub enum EstablishedConnectionEvent {
     Event { key: Key, event: KademliaEvent },
+    Closed { key: Key, error: String },
     Error(io::Error),
 }
 
@@ -351,4 +357,5 @@ pub enum EstablishedConnectionEvent {
 pub enum PoolEvent {
     NewConnection { key: Key, remote_addr: SocketAddr },
     Request { key: Key, event: KademliaEvent },
+    ConnectionClosed { key: Key, error: String },
 }

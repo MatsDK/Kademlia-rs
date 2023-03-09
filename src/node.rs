@@ -197,6 +197,11 @@ impl KademliaNode {
             PoolEvent::Request { key, event } => {
                 self.handle_incoming_event(key, event);
             }
+            PoolEvent::ConnectionClosed { key, error } => {
+                eprintln!("Connection closed: {}", error);
+                self.connected_peers.remove(&key);
+                // TODO: should set node status to `Disconnected` in routing table
+            }
         }
         None
     }

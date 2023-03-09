@@ -44,7 +44,6 @@ impl Transport {
         })
     }
 
-    // pub async fn dial(&self, addr: &Multiaddr) -> Result<TcpStream, String> {
     pub fn dial(&self, addr: &Multiaddr) -> Result<Dial, TransportError> {
         let socket_addr = if let Ok(sa) = multiaddr_to_socketaddr(addr.clone()) {
             sa
