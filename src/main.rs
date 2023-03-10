@@ -10,6 +10,7 @@ mod node;
 mod pool;
 mod query;
 mod routing;
+mod store;
 mod transport;
 
 use crate::key::Key;
@@ -33,7 +34,7 @@ struct Args {
 async fn main() -> io::Result<()> {
     let Args { addr, dial } = Args::parse();
 
-    let key = if let Some(_) = dial {
+    let key = if dial.is_some() {
         Key::random()
     } else {
         Key::from_str(BOOTSTRAP_NODE_KEY).unwrap()

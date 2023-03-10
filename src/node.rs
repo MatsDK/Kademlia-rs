@@ -13,6 +13,7 @@ use crate::{
     pool::{Pool, PoolEvent},
     query::{Query, QueryPool, QueryPoolState},
     routing::{Node, RoutingTable},
+    store::RecordStore,
     transport::{socketaddr_to_multiaddr, Transport, TransportEvent},
 };
 
@@ -25,6 +26,7 @@ pub struct KademliaNode {
     connected_peers: HashSet<Key>,
     queued_events: VecDeque<NodeEvent>,
     pending_event: Option<(Key, KademliaEvent)>,
+    store: RecordStore,
 }
 
 impl KademliaNode {
@@ -36,11 +38,12 @@ impl KademliaNode {
         Ok(Self {
             routing_table: RoutingTable::new(key.clone()),
             transport,
-            pool: Pool::new(key),
+            pool: Pool::new(key.clone()),
             queries: QueryPool::new(),
             connected_peers: HashSet::new(),
             queued_events: VecDeque::new(),
             pending_event: None,
+            store: RecordStore::new(key),
         })
     }
 
