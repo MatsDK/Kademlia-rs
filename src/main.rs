@@ -15,6 +15,7 @@ mod transport;
 
 use crate::key::Key;
 use crate::node::{KademliaNode, OutEvent, QueryResult};
+use crate::store::Record;
 
 pub const K_VALUE: usize = 4;
 static BOOTSTRAP_NODE_KEY: &str = "JA73AGTSG3bhqKuEYc2LdsyQLJafQoGrDvzh5q433qDi";
@@ -58,6 +59,23 @@ async fn main() -> io::Result<()> {
                     "FIND_NODE" => {
                         let key = Key::random();
                         node.find_node(&key);
+                    }
+                    "PUT" => {
+                        let key = Key::random();
+                        let record = Record {
+                            key,
+                            value: Vec::new(),
+                            publisher: None,
+                            expires: None
+
+                        };
+
+                        node.put_record(record).unwrap();
+                    }
+                    "GET" => {
+                        let key = Key::random();
+
+                        println!("GET result: {:?}", node.get_record(key));
                     }
                     _ => {}
                 }

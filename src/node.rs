@@ -13,7 +13,7 @@ use crate::{
     pool::{Pool, PoolEvent},
     query::{Query, QueryPool, QueryPoolState},
     routing::{Node, RoutingTable},
-    store::RecordStore,
+    store::{Record, RecordStore},
     transport::{socketaddr_to_multiaddr, Transport, TransportEvent},
 };
 
@@ -109,6 +109,19 @@ impl KademliaNode {
         );
 
         Ok(())
+    }
+
+    pub fn put_record(&mut self, mut record: Record) -> Result<(), String> {
+        self.store.put(record).unwrap();
+        Ok(())
+    }
+
+    pub fn get_record(&mut self, key: Key) -> Option<&Record> {
+        if let Some(record) = self.store.get(&key) {
+            return Some(record);
+        }
+
+        None
     }
 
     pub fn local_key(&self) -> &Key {
