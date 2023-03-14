@@ -112,7 +112,18 @@ impl KademliaNode {
     }
 
     pub fn put_record(&mut self, mut record: Record) -> Result<(), String> {
-        self.store.put(record).unwrap();
+        self.store.put(record.clone()).unwrap();
+
+        let peers = self.routing_table.closest_nodes(&record.key);
+        let request_id = self.queries.next_query_id();
+        let target = record.key.clone();
+        self.queries.add_query(
+            target,
+            peers,
+            request_id,
+            KademliaEvent::PutRecordReq { record, request_id },
+        );
+
         Ok(())
     }
 
@@ -145,6 +156,11 @@ impl KademliaNode {
                 request_id: query_id,
             },
         );
+    }
+
+    pub fn record_received(&mut self, record: Record, query_id: usize) {
+        println!("stored record successfully: {record:?}");
+        self.store.put(record).unwrap();
     }
 
     fn handle_transport_event(&mut self, ev: TransportEvent) {
@@ -183,6 +199,10 @@ impl KademliaNode {
                     query.on_success(&key, closest_nodes, local_key);
                 }
             }
+            KademliaEvent::PutRecordReq { record, request_id } => {
+                self.record_received(record, request_id);
+            }
+            KademliaEvent::PutRecordRes {} => {}
             KademliaEvent::Ping { .. } => {}
         }
     }
@@ -386,6 +406,11 @@ pub enum KademliaEvent {
         closest_nodes: Vec<Node>,
         request_id: usize,
     },
+    PutRecordReq {
+        record: Record,
+        request_id: usize,
+    },
+    PutRecordRes {},
     Ping {
         target: Key,
     },

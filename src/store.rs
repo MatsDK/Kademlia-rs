@@ -3,6 +3,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use serde::{Deserialize, Serialize};
+
 use crate::key::Key;
 
 #[derive(Debug)]
@@ -26,7 +28,6 @@ impl RecordStore {
     }
 
     pub fn put(&mut self, record: Record) -> Result<(), ()> {
-        println!("successful PUT {:?}", record);
         match self.records.entry(record.key.clone()) {
             Entry::Occupied(mut e) => {
                 e.insert(record);
@@ -45,10 +46,10 @@ impl RecordStore {
     fn remove(&mut self) {}
 }
 
-#[derive(Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Record {
     pub key: Key,
     pub value: Vec<u8>,
     pub publisher: Option<Key>,
-    pub expires: Option<Instant>,
+    pub expires: Option<Duration>,
 }
