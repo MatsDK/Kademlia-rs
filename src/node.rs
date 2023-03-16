@@ -115,8 +115,20 @@ impl KademliaNode {
         self.store.put(record.clone()).unwrap();
 
         let peers = self.routing_table.closest_nodes(&record.key);
-        let request_id = self.queries.next_query_id();
         let target = record.key.clone();
+
+        // let request_id = self.queries.next_query_id();
+        // self.queries.add_query(
+        //     target.clone(),
+        //     peers.clone(),
+        //     request_id,
+        //     KademliaEvent::FindNodeReq {
+        //         target: target.clone(),
+        //         request_id,
+        //     },
+        // );
+
+        let request_id = self.queries.next_query_id();
         self.queries.add_query(
             target,
             peers,
@@ -201,8 +213,18 @@ impl KademliaNode {
             }
             KademliaEvent::PutRecordReq { record, request_id } => {
                 self.record_received(record, request_id);
+
+                self.queued_events.push_back(NodeEvent::Notify {
+                    peer_id: key,
+                    event: KademliaEvent::PutRecordRes { request_id },
+                });
             }
-            KademliaEvent::PutRecordRes {} => {}
+            KademliaEvent::PutRecordRes { request_id } => {
+                let local_key = self.local_key().clone();
+                if let Some(query) = self.queries.get_mut(&request_id) {
+                    query.on_success(&key, vec![], local_key);
+                }
+            }
             KademliaEvent::Ping { .. } => {}
         }
     }
@@ -269,6 +291,12 @@ impl KademliaNode {
                         target,
                         nodes: peers,
                     },
+                };
+                return Some(NodeEvent::GenerateEvent(out_ev));
+            }
+            KademliaEvent::PutRecordReq { .. } => {
+                let out_ev = OutEvent::OutBoundQueryProgressed {
+                    result: QueryResult::PutRecord {},
                 };
                 return Some(NodeEvent::GenerateEvent(out_ev));
             }
@@ -410,7 +438,9 @@ pub enum KademliaEvent {
         record: Record,
         request_id: usize,
     },
-    PutRecordRes {},
+    PutRecordRes {
+        request_id: usize,
+    },
     Ping {
         target: Key,
     },
@@ -433,4 +463,5 @@ pub enum OutEvent {
 #[derive(Debug, Clone)]
 pub enum QueryResult {
     FindNode { nodes: Vec<Key>, target: Key },
+    PutRecord {},
 }

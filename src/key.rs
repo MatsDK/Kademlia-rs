@@ -1,3 +1,4 @@
+use core_::array::TryFromSliceError;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -39,11 +40,11 @@ impl Key {
 }
 
 impl FromStr for Key {
-    type Err = ();
+    type Err = TryFromSliceError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let key = Key(Sha256::digest(s.as_bytes()).into());
-        Ok(key)
+        let decoded = bs58::decode(s).into_vec().unwrap();
+        <&[u8] as TryInto<[u8; 32]>>::try_into(&decoded[..32]).map(Key)
     }
 }
 

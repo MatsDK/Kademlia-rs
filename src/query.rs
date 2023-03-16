@@ -116,6 +116,8 @@ pub struct Query {
     pub waiting_events: HashMap<Key, Vec<KademliaEvent>>,
 }
 
+pub enum QueryInfo {}
+
 impl Query {
     pub fn new(peers_iter: PeersIter, event: KademliaEvent, query_id: usize) -> Self {
         Self {

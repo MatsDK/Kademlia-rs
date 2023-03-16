@@ -18,7 +18,7 @@ use crate::node::{KademliaNode, OutEvent, QueryResult};
 use crate::store::Record;
 
 pub const K_VALUE: usize = 4;
-static BOOTSTRAP_NODE_KEY: &str = "JA73AGTSG3bhqKuEYc2LdsyQLJafQoGrDvzh5q433qDi";
+static BOOTSTRAP_NODE_KEY: &str = "5zrr7BPc5gnMV6EbdpPfxpoJfZuddRH8PK1EQQmEAPFw";
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -55,12 +55,21 @@ async fn main() -> io::Result<()> {
     loop {
         tokio::select! {
             Ok(Some(line)) = reader.next_line() => {
-                match line.as_str() {
-                    "FIND_NODE" => {
-                        let key = Key::random();
+                let mut args = line.split(' ');
+                match args.next() {
+                    Some("FIND_NODE") => {
+                        let key = {
+                            match args.next() {
+                                Some(key) => Key::from_str(&key).unwrap(),
+                                None => {
+                                    Key::random()
+                                }
+                            }
+                        };
+
                         node.find_node(&key);
                     }
-                    "PUT" => {
+                    Some("PUT") => {
                         let key = Key::random();
                         let record = Record {
                             key,
@@ -72,7 +81,7 @@ async fn main() -> io::Result<()> {
 
                         node.put_record(record).unwrap();
                     }
-                    "GET" => {
+                    Some("GET") => {
                         let key = Key::random();
 
                         println!("GET result: {:?}", node.get_record(key));
@@ -92,6 +101,9 @@ async fn main() -> io::Result<()> {
                                 for node in nodes {
                                     println!("\t{node}");
                                 }
+                            }
+                            QueryResult::PutRecord{.. } => {
+                                println!("> Put record finished");
                             }
                         }
                     }
