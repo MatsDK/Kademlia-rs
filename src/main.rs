@@ -45,7 +45,7 @@ async fn main() -> io::Result<()> {
 
     if let Some(dial) = dial {
         let key = Key::from_str(BOOTSTRAP_NODE_KEY).unwrap();
-        println!("dialing {key} on {dial:?}");
+        println!(">> dialing {key} on {dial:?}");
         node.add_address(&key, dial);
         node.bootstrap().unwrap();
     }
@@ -56,24 +56,36 @@ async fn main() -> io::Result<()> {
         tokio::select! {
             Ok(Some(line)) = reader.next_line() => {
                 let mut args = line.split(' ');
+
                 match args.next() {
                     Some("FIND_NODE") => {
                         let key = {
                             match args.next() {
                                 Some(key) => Key::from_str(&key).unwrap(),
-                                None => {
-                                    Key::random()
-                                }
+                                None => Key::random()
                             }
                         };
 
                         node.find_node(&key);
                     }
                     Some("PUT") => {
-                        let key = Key::random();
+                        let value = {
+                            match args.next() {
+                                Some(v) => v.as_bytes().to_vec(),
+                                None => vec![]
+                            }
+                        };
+
+                        let key = {
+                            match args.next() {
+                                Some(key) => Key::from_str(&key).unwrap(),
+                                None => Key::random()
+                            }
+                        };
+
                         let record = Record {
                             key,
-                            value: Vec::new(),
+                            value,
                             publisher: None,
                             expires: None
 
@@ -82,7 +94,12 @@ async fn main() -> io::Result<()> {
                         node.put_record(record).unwrap();
                     }
                     Some("GET") => {
-                        let key = Key::random();
+                        let key = {
+                            match args.next() {
+                                Some(key) => Key::from_str(&key).unwrap(),
+                                None => Key::random()
+                            }
+                        };
 
                         println!("GET result: {:?}", node.get_record(key));
                     }

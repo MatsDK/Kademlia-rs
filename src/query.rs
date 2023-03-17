@@ -250,7 +250,7 @@ impl PeersIter {
             self.closest_peers.entry(distance).or_insert(new_peer);
         }
 
-        // Set new iterator state, check if iteration stalled based on
+        // TODO: Set new iterator state, check if iteration stalled based on
         // the `ALPHA_VALUE` (Parallelism) and if the iterator made progres
         // self.state = match self.state {
         //     PeersIterState::Iterating {
