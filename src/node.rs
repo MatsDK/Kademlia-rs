@@ -11,7 +11,7 @@ use std::{
 use crate::{
     key::Key,
     pool::{Pool, PoolEvent},
-    query::{Query, QueryPool, QueryPoolState},
+    query::{PutRecordStep, Query, QueryInfo, QueryPool, QueryPoolState},
     routing::{Node, RoutingTable},
     store::{Record, RecordStore},
     transport::{socketaddr_to_multiaddr, Transport, TransportEvent},
@@ -97,16 +97,10 @@ impl KademliaNode {
         let local_key = self.routing_table.local_key.clone();
 
         let peers = self.routing_table.closest_nodes(&local_key);
-        let query_id = self.queries.next_query_id();
-        self.queries.add_query(
-            local_key.clone(),
-            peers,
-            query_id,
-            KademliaEvent::FindNodeReq {
-                target: local_key,
-                request_id: query_id,
-            },
-        );
+        let query_info = QueryInfo::FindNode {
+            target: local_key.clone(),
+        };
+        self.queries.add_query(local_key.clone(), peers, query_info);
 
         Ok(())
     }
@@ -128,13 +122,11 @@ impl KademliaNode {
         //     },
         // );
 
-        let request_id = self.queries.next_query_id();
-        self.queries.add_query(
-            target,
-            peers,
-            request_id,
-            KademliaEvent::PutRecordReq { record, request_id },
-        );
+        let query_info = QueryInfo::PutRecord {
+            record,
+            step: PutRecordStep::FindNodes,
+        };
+        self.queries.add_query(target, peers, query_info);
 
         Ok(())
     }
@@ -157,17 +149,11 @@ impl KademliaNode {
 
     pub fn find_node(&mut self, target: &Key) {
         let peers = self.routing_table.closest_nodes(target);
-        let query_id = self.queries.next_query_id();
 
-        self.queries.add_query(
-            target.clone(),
-            peers,
-            query_id,
-            KademliaEvent::FindNodeReq {
-                target: target.clone(),
-                request_id: query_id,
-            },
-        );
+        let query_info = QueryInfo::FindNode {
+            target: target.clone(),
+        };
+        self.queries.add_query(target.clone(), peers, query_info);
     }
 
     pub fn record_received(&mut self, record: Record, query_id: usize) {
@@ -282,8 +268,8 @@ impl KademliaNode {
     }
 
     fn query_finished(&self, query: Query) -> Option<NodeEvent> {
-        match query.get_event() {
-            KademliaEvent::FindNodeReq { target, .. } => {
+        match query.query_info {
+            QueryInfo::FindNode { target } => {
                 let peers = query.get_peers();
 
                 let out_ev = OutEvent::OutBoundQueryProgressed {
@@ -292,19 +278,17 @@ impl KademliaNode {
                         nodes: peers,
                     },
                 };
-                return Some(NodeEvent::GenerateEvent(out_ev));
+
+                Some(NodeEvent::GenerateEvent(out_ev))
             }
-            KademliaEvent::PutRecordReq { .. } => {
+            QueryInfo::PutRecord { record, step } => {
                 let out_ev = OutEvent::OutBoundQueryProgressed {
                     result: QueryResult::PutRecord {},
                 };
-                return Some(NodeEvent::GenerateEvent(out_ev));
+
+                Some(NodeEvent::GenerateEvent(out_ev))
             }
-            _ => {
-                eprintln!("Should not get this in query_finished: {:?}", query);
-            }
-        };
-        None
+        }
     }
 
     fn poll_next_query(&mut self, cx: &mut Context<'_>) -> Poll<NodeEvent> {
@@ -326,10 +310,10 @@ impl KademliaNode {
                         if self.connected_peers.contains(&key) {
                             self.queued_events.push_back(NodeEvent::Notify {
                                 peer_id: key,
-                                event: q.get_event(),
+                                event: q.get_request(),
                             });
                         } else {
-                            let ev = q.get_event();
+                            let ev = q.get_request();
                             q.waiting_events.entry(key.clone()).or_default().push(ev);
                             self.queued_events
                                 .push_back(NodeEvent::Dial { peer_id: key })

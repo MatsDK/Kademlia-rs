@@ -6,6 +6,7 @@ use crate::{
     key::{Distance, Key},
     node::KademliaEvent,
     routing::Node,
+    store::Record,
     K_VALUE,
 };
 
@@ -30,18 +31,19 @@ impl QueryPool {
         }
     }
 
-    pub fn add_query(&mut self, target: Key, peers: Vec<Node>, query_id: usize, ev: KademliaEvent) {
+    pub fn add_query(&mut self, target: Key, peers: Vec<Node>, info: QueryInfo) {
         if peers.is_empty() {
             return;
         }
 
+        let query_id = self.next_query_id();
         let peer_keys = peers
             .into_iter()
             .map(|Node { key, .. }| key)
             .collect::<Vec<_>>();
 
         let peers_iter = PeersIter::new(target, peer_keys);
-        let query = Query::new(peers_iter, ev, query_id);
+        let query = Query::new(peers_iter, info, query_id);
         self.queries.insert(query_id, query);
     }
 
@@ -110,22 +112,54 @@ pub enum QueryState {
 #[derive(Debug)]
 pub struct Query {
     peers_iter: PeersIter,
-    event: KademliaEvent,
+    pub query_info: QueryInfo,
     id: usize,
     discovered_addrs: HashMap<Key, Multiaddr>,
     pub waiting_events: HashMap<Key, Vec<KademliaEvent>>,
 }
 
-pub enum QueryInfo {}
+#[derive(Debug)]
+pub enum PutRecordStep {
+    FindNodes,
+    PutRecord { put_success: Vec<Key> },
+}
 
+#[derive(Debug)]
+pub enum QueryInfo {
+    FindNode { target: Key },
+    PutRecord { record: Record, step: PutRecordStep },
+}
+
+// impl Into<KademliaEvent> for QueryInfo {
+// convert from `QueryInfo` to `KademliaEvent` for sending requests
+impl QueryInfo {
+    fn into_request(&self, request_id: usize) -> KademliaEvent {
+        match self {
+            QueryInfo::FindNode { target } => KademliaEvent::FindNodeReq {
+                target: target.clone(),
+                request_id,
+            },
+            QueryInfo::PutRecord { record, step } => match step {
+                PutRecordStep::FindNodes => KademliaEvent::FindNodeReq {
+                    target: record.key,
+                    request_id,
+                },
+                PutRecordStep::PutRecord { .. } => KademliaEvent::PutRecordReq {
+                    record: record.clone(),
+                    request_id,
+                },
+            },
+        }
+    }
+}
 impl Query {
-    pub fn new(peers_iter: PeersIter, event: KademliaEvent, query_id: usize) -> Self {
+    pub fn new(peers_iter: PeersIter, info: QueryInfo, query_id: usize) -> Self {
         Self {
             peers_iter,
-            event,
             id: query_id,
             discovered_addrs: Default::default(),
             waiting_events: Default::default(),
+            query_info: info,
         }
     }
 
@@ -133,8 +167,8 @@ impl Query {
         self.id
     }
 
-    pub fn get_event(&self) -> KademliaEvent {
-        self.event.clone()
+    pub fn get_request(&self) -> KademliaEvent {
+        self.query_info.into_request(self.id)
     }
 
     pub fn get_addr_for_peer(&self, peer: &Key) -> Option<&Multiaddr> {

@@ -7,7 +7,7 @@ use uint::*;
 
 // #[derive(Clone, Debug)]
 // pub struct Key(GenericArray<u8, U32>);
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Hash)]
 pub struct Key([u8; 32]);
 
 construct_uint! {
