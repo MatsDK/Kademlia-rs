@@ -98,7 +98,7 @@ impl KademliaNode {
         let local_key = self.routing_table.local_key.clone();
 
         let peers = self.routing_table.closest_nodes(&local_key);
-        let query_info = QueryInfo::FindNode {
+        let query_info = QueryInfo::Bootstrap {
             target: local_key.clone(),
         };
         self.queries.add_query(local_key.clone(), peers, query_info);
@@ -351,6 +351,11 @@ impl KademliaNode {
                 };
 
                 Some(NodeEvent::GenerateEvent(out_ev))
+            }
+            QueryInfo::Bootstrap { .. } => {
+                // println!("first iteration of bootstrap complete");
+                // TODO: should refresh some buckets
+                None
             }
         }
     }

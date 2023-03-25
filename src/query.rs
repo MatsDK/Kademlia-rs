@@ -173,6 +173,9 @@ pub enum QueryInfo {
         step: PutRecordStep,
         quorum: NonZeroUsize,
     },
+    Bootstrap {
+        target: Key,
+    },
 }
 
 // impl Into<KademliaEvent> for QueryInfo {
@@ -193,6 +196,10 @@ impl QueryInfo {
                     record: record.clone(),
                     request_id,
                 },
+            },
+            QueryInfo::Bootstrap { target } => KademliaEvent::FindNodeReq {
+                target: target.clone(),
+                request_id,
             },
         }
     }
