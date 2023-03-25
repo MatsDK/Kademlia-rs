@@ -1,3 +1,4 @@
+use core::fmt;
 use std::{
     collections::{hash_map::Entry, HashMap},
     time::Duration,
@@ -52,4 +53,11 @@ pub struct Record {
     pub value: Vec<u8>,
     pub publisher: Option<Key>,
     pub expires: Option<Duration>,
+}
+
+impl fmt::Display for Record {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let value = String::from_utf8(self.value.clone()).unwrap();
+        write!(f, "{{ key: {}, value: {} }}", self.key, value)
+    }
 }

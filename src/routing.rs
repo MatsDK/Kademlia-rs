@@ -7,7 +7,7 @@ use crate::{
     K_VALUE,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum NodeStatus {
     Connected,
     Disconnected,
@@ -43,6 +43,40 @@ impl KBucket {
     fn get_nodes(&self) -> Vec<Node> {
         self.nodes.to_vec()
     }
+
+    fn get_node(&self, key: Key) -> Option<&Node> {
+        self.nodes.iter().find(|n| n.key == key)
+    }
+
+    fn get_index(&self, key: Key) -> Option<usize> {
+        self.nodes.iter().position(|n| n.key == key)
+    }
+
+    fn remove(&mut self, key: Key) -> Option<Node> {
+        if let Some(i) = self.get_index(key) {
+            let node = self.nodes.remove(i);
+
+            Some(node)
+        } else {
+            None
+        }
+    }
+
+    fn insert(&mut self, node: Node) {
+        // TODO: If the bucket is full we should check if there is a disconnected node
+        if self.nodes.is_full() {
+            return;
+        }
+
+        self.nodes.push(node);
+    }
+
+    fn update(&mut self, key: Key, status: NodeStatus) {
+        if let Some(mut node) = self.remove(key) {
+            node.status = status;
+            self.insert(node);
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -59,23 +93,34 @@ impl RoutingTable {
         }
     }
 
-    pub fn insert(&mut self, target: &Key, addr: Multiaddr) {
-        let d = &self.local_key.distance(target);
+    pub fn update_node_status(
+        &mut self,
+        target: Key,
+        addr: Option<Multiaddr>,
+        new_status: NodeStatus,
+    ) {
+        let d = &self.local_key.distance(&target);
         let bucket_idx = BucketIndex::new(d);
 
         if let Some(i) = bucket_idx {
             let bucket = &mut self.kbuckets[i.index()];
 
-            // TODO: If the bucket is full we should check if there is a disconnected node
-            if bucket.nodes.is_full() {
-                return;
+            match bucket.get_node(target) {
+                Some(node) => {
+                    if node.status != new_status {
+                        bucket.update(target, new_status);
+                    }
+                }
+                None => {
+                    if let Some(addr) = addr {
+                        bucket.insert(Node {
+                            key: target,
+                            addr,
+                            status: new_status,
+                        })
+                    }
+                }
             }
-
-            bucket.nodes.push(Node {
-                key: target.clone(),
-                addr,
-                status: NodeStatus::Connected,
-            });
         } else {
             eprintln!("SelfEntry");
         }
@@ -88,7 +133,7 @@ impl RoutingTable {
         let mut bucket_idx = BucketIndex::new(&d);
 
         if bucket_idx.is_none() {
-            eprintln!("Self lookup");
+            // eprintln!("Self lookup");
             bucket_idx = Some(BucketIndex(0));
             // return closest;
         }

@@ -13,7 +13,7 @@ use crate::{
     key::Key,
     pool::{Pool, PoolEvent},
     query::{PutRecordStep, Query, QueryInfo, QueryPool, QueryPoolState, Quorum},
-    routing::{Node, RoutingTable},
+    routing::{Node, NodeStatus, RoutingTable},
     store::{Record, RecordStore},
     transport::{socketaddr_to_multiaddr, Transport, TransportEvent},
 };
@@ -135,8 +135,19 @@ impl KademliaNode {
     }
 
     pub fn add_address(&mut self, key: &Key, addr: Multiaddr) {
-        self.routing_table.insert(key, addr);
+        let status = if self.connected_peers.contains(key) {
+            NodeStatus::Connected
+        } else {
+            NodeStatus::Disconnected
+        };
+
+        self.routing_table
+            .update_node_status(key.clone(), Some(addr), status);
     }
+
+    // fn update_node_status(&mut self, key: Key, addr: Option<Multiaddr>, status: NodeStatus) {
+    //     self.routing_table.update_node_status(key, addr, status);
+    // }
 
     pub fn find_node(&mut self, target: &Key) {
         let peers = self.routing_table.closest_nodes(target);
@@ -148,9 +159,8 @@ impl KademliaNode {
     }
 
     fn record_received(&mut self, peer_id: Key, record: Record, request_id: usize) {
-        println!("stored record successfully: {record:?}");
+        println!("stored record successfully: {record}");
         self.store.put(record).unwrap();
-
         self.queued_events.push_back(NodeEvent::Notify {
             peer_id,
             event: KademliaEvent::PutRecordRes { request_id },
@@ -248,9 +258,16 @@ impl KademliaNode {
                 self.handle_incoming_event(key, event);
             }
             PoolEvent::ConnectionClosed { key, error } => {
-                eprintln!("Connection closed: {}", error);
+                // Set the state for the closed peer to `PeerState::Failed`
+                for query in self.queries.iter_mut() {
+                    query.on_failure(&key);
+                }
                 self.connected_peers.remove(&key);
-                // TODO: should set node status to `Disconnected` in routing table
+
+                self.routing_table
+                    .update_node_status(key, None, NodeStatus::Disconnected);
+
+                eprintln!("Connection closed with message: {}", error);
             }
         }
         None

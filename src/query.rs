@@ -249,6 +249,10 @@ impl Query {
         self.peers_iter.on_success(peer, other_peers);
     }
 
+    pub fn on_failure(&mut self, peer: &Key) {
+        self.peers_iter.on_failure(peer);
+    }
+
     pub fn next(&mut self) -> QueryState {
         self.peers_iter.next()
     }
@@ -310,15 +314,15 @@ impl PeersIter {
             .collect()
     }
 
-    pub fn on_success(&mut self, peer_id: &Key, closer_peers: Vec<Node>) -> bool {
+    pub fn on_success(&mut self, peer_id: &Key, closer_peers: Vec<Node>) {
         if let PeersIterState::Finished = self.state {
-            return false;
+            return;
         }
 
         let distance = peer_id.distance(&self.target);
         // Update the state of the resolved peer
         match self.closest_peers.entry(distance) {
-            Entry::Vacant(..) => return false,
+            Entry::Vacant(..) => return,
             Entry::Occupied(mut e) => match e.get().state {
                 PeerState::Waiting => {
                     self.num_waiting -= 1;
@@ -327,7 +331,7 @@ impl PeersIter {
                 PeerState::Unresponsive => {
                     e.get_mut().state = PeerState::Succeeded;
                 }
-                PeerState::NotContacted | PeerState::Failed | PeerState::Succeeded => return false,
+                PeerState::NotContacted | PeerState::Failed | PeerState::Succeeded => return,
             },
         }
 
@@ -350,7 +354,26 @@ impl PeersIter {
         //     PeersIterState::Iterating {
         //     }
         // }
-        true
+    }
+
+    fn on_failure(&mut self, peer: &Key) {
+        if let PeersIterState::Finished = self.state {
+            return;
+        }
+
+        let distance = peer.distance(&self.target);
+        // Update the state of the failed peer
+        match self.closest_peers.entry(distance) {
+            Entry::Vacant(..) => return,
+            Entry::Occupied(mut e) => match e.get().state {
+                PeerState::Waiting => {
+                    self.num_waiting -= 1;
+                    e.get_mut().state = PeerState::Failed;
+                }
+                PeerState::Unresponsive => e.get_mut().state = PeerState::Failed,
+                PeerState::NotContacted | PeerState::Failed | PeerState::Succeeded => return,
+            },
+        }
     }
 
     pub fn next(&mut self) -> QueryState {
