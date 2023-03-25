@@ -1,4 +1,7 @@
-use std::collections::{btree_map::Entry, BTreeMap, HashMap};
+use std::{
+    collections::{btree_map::Entry, BTreeMap, HashMap},
+    num::NonZeroUsize,
+};
 
 use multiaddr::Multiaddr;
 
@@ -32,15 +35,21 @@ impl QueryPool {
     }
 
     pub fn add_query(&mut self, target: Key, peers: Vec<Node>, info: QueryInfo) {
+        let query_id = self.next_query_id();
+        self.add_query_with_id(query_id, target, peers, info);
+    }
+
+    pub fn add_query_with_id(
+        &mut self,
+        query_id: usize,
+        target: Key,
+        peers: Vec<Node>,
+        info: QueryInfo,
+    ) {
+        assert!(!self.queries.contains_key(&query_id));
         if peers.is_empty() {
             return;
         }
-
-        let query_id = self.next_query_id();
-        // let peer_keys = peers
-        //     .into_iter()
-        //     .map(|Node { key, .. }| key)
-        //     .collect::<Vec<_>>();
 
         let peers_iter = PeersIter::new(target, peers);
         let query = Query::new(peers_iter, info, query_id);
@@ -120,6 +129,7 @@ pub struct Query {
 
 #[derive(Debug)]
 pub struct QueryResultOutput {
+    pub query_id: usize,
     pub nodes: Vec<Node>,
     pub info: QueryInfo,
 }
@@ -139,9 +149,30 @@ pub enum PutRecordStep {
 }
 
 #[derive(Debug)]
+pub enum Quorum {
+    One,
+    N(NonZeroUsize),
+}
+
+impl Into<NonZeroUsize> for Quorum {
+    fn into(self) -> NonZeroUsize {
+        match self {
+            Quorum::One => NonZeroUsize::new(1).expect("Quorum is set to one"),
+            Quorum::N(n) => NonZeroUsize::min(NonZeroUsize::new(K_VALUE).expect("K_VALUE > 0"), n),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub enum QueryInfo {
-    FindNode { target: Key },
-    PutRecord { record: Record, step: PutRecordStep },
+    FindNode {
+        target: Key,
+    },
+    PutRecord {
+        record: Record,
+        step: PutRecordStep,
+        quorum: NonZeroUsize,
+    },
 }
 
 // impl Into<KademliaEvent> for QueryInfo {
@@ -153,7 +184,7 @@ impl QueryInfo {
                 target: target.clone(),
                 request_id,
             },
-            QueryInfo::PutRecord { record, step } => match step {
+            QueryInfo::PutRecord { record, step, .. } => match step {
                 PutRecordStep::FindNodes => KademliaEvent::FindNodeReq {
                     target: record.key,
                     request_id,
@@ -196,7 +227,12 @@ impl Query {
         QueryResultOutput {
             nodes,
             info: self.query_info,
+            query_id: self.id,
         }
+    }
+
+    pub fn finish(&mut self) {
+        self.peers_iter.finish();
     }
 
     pub fn on_success(&mut self, peer: &Key, closer_peers: Vec<Node>, local_key: Key) {
@@ -254,6 +290,10 @@ impl PeersIter {
             num_waiting: 0,
             num_results: K_VALUE,
         }
+    }
+
+    pub fn finish(&mut self) {
+        self.state = PeersIterState::Finished;
     }
 
     pub fn get_peers(self) -> Vec<Node> {

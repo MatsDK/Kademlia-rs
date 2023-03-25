@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashSet, VecDeque},
     io,
+    num::NonZeroUsize,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -11,7 +12,7 @@ use std::{
 use crate::{
     key::Key,
     pool::{Pool, PoolEvent},
-    query::{PutRecordStep, Query, QueryInfo, QueryPool, QueryPoolState},
+    query::{PutRecordStep, Query, QueryInfo, QueryPool, QueryPoolState, Quorum},
     routing::{Node, RoutingTable},
     store::{Record, RecordStore},
     transport::{socketaddr_to_multiaddr, Transport, TransportEvent},
@@ -105,26 +106,16 @@ impl KademliaNode {
         Ok(())
     }
 
-    pub fn put_record(&mut self, mut record: Record) -> Result<(), String> {
+    pub fn put_record(&mut self, record: Record, quorum: Quorum) -> Result<(), String> {
         self.store.put(record.clone()).unwrap();
 
         let peers = self.routing_table.closest_nodes(&record.key);
         let target = record.key.clone();
 
-        // let request_id = self.queries.next_query_id();
-        // self.queries.add_query(
-        //     target.clone(),
-        //     peers.clone(),
-        //     request_id,
-        //     KademliaEvent::FindNodeReq {
-        //         target: target.clone(),
-        //         request_id,
-        //     },
-        // );
-
         let query_info = QueryInfo::PutRecord {
             record,
             step: PutRecordStep::FindNodes,
+            quorum: quorum.into(),
         };
         self.queries.add_query(target, peers, query_info);
 
@@ -156,9 +147,14 @@ impl KademliaNode {
         self.queries.add_query(target.clone(), peers, query_info);
     }
 
-    pub fn record_received(&mut self, record: Record, query_id: usize) {
+    fn record_received(&mut self, peer_id: Key, record: Record, request_id: usize) {
         println!("stored record successfully: {record:?}");
         self.store.put(record).unwrap();
+
+        self.queued_events.push_back(NodeEvent::Notify {
+            peer_id,
+            event: KademliaEvent::PutRecordRes { request_id },
+        });
     }
 
     fn handle_transport_event(&mut self, ev: TransportEvent) {
@@ -198,17 +194,27 @@ impl KademliaNode {
                 }
             }
             KademliaEvent::PutRecordReq { record, request_id } => {
-                self.record_received(record, request_id);
-
-                self.queued_events.push_back(NodeEvent::Notify {
-                    peer_id: key,
-                    event: KademliaEvent::PutRecordRes { request_id },
-                });
+                self.record_received(key, record, request_id);
             }
             KademliaEvent::PutRecordRes { request_id } => {
                 let local_key = self.local_key().clone();
+
                 if let Some(query) = self.queries.get_mut(&request_id) {
                     query.on_success(&key, vec![], local_key);
+
+                    if let QueryInfo::PutRecord {
+                        step: PutRecordStep::PutRecord { put_success },
+                        quorum,
+                        ..
+                    } = &mut query.query_info
+                    {
+                        put_success.push(key);
+
+                        // Quorum is reached -> query should be finished
+                        if put_success.len() >= quorum.get() {
+                            query.finish()
+                        }
+                    }
                 }
             }
             KademliaEvent::Ping { .. } => {}
@@ -283,29 +289,48 @@ impl KademliaNode {
             QueryInfo::PutRecord {
                 record,
                 step: PutRecordStep::FindNodes,
+                quorum,
             } => {
                 let target = record.key.clone();
 
                 let query_info = QueryInfo::PutRecord {
                     record,
+                    quorum,
                     step: PutRecordStep::PutRecord {
                         put_success: vec![],
                     },
                 };
 
                 // TODO: make sure this is a fixed set of peers iterator for `query_result.nodes`
-                self.queries
-                    .add_query(target, query_result.nodes, query_info);
+                self.queries.add_query_with_id(
+                    query_result.query_id,
+                    target,
+                    query_result.nodes,
+                    query_info,
+                );
 
                 None
             }
             QueryInfo::PutRecord {
                 record,
-                step: PutRecordStep::PutRecord { .. },
+                step: PutRecordStep::PutRecord { put_success },
+                quorum,
             } => {
-                // TODO: check if Quorum was successfull
+                let key = record.key;
+                let res = {
+                    if put_success.len() >= quorum.get() {
+                        Ok(PutRecordOk { key })
+                    } else {
+                        Err(PutRecordError::QuorumFailed {
+                            key,
+                            quorum,
+                            successfull_peers: put_success,
+                        })
+                    }
+                };
+
                 let out_ev = OutEvent::OutBoundQueryProgressed {
-                    result: QueryResult::PutRecord { key: record.key },
+                    result: QueryResult::PutRecord(res),
                 };
 
                 Some(NodeEvent::GenerateEvent(out_ev))
@@ -469,5 +494,21 @@ pub enum OutEvent {
 #[derive(Debug, Clone)]
 pub enum QueryResult {
     FindNode { nodes: Vec<Key>, target: Key },
-    PutRecord { key: Key },
+    PutRecord(PutRecordResult),
+}
+
+type PutRecordResult = Result<PutRecordOk, PutRecordError>;
+
+#[derive(Debug, Clone)]
+pub struct PutRecordOk {
+    pub key: Key,
+}
+
+#[derive(Debug, Clone)]
+pub enum PutRecordError {
+    QuorumFailed {
+        key: Key,
+        quorum: NonZeroUsize,
+        successfull_peers: Vec<Key>,
+    },
 }

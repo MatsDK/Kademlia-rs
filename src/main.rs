@@ -2,6 +2,7 @@ use clap::Parser;
 use futures::StreamExt;
 use multiaddr::Multiaddr;
 use std::io;
+use std::num::NonZeroUsize;
 use std::str::FromStr;
 use tokio::io::{stdin, AsyncBufReadExt, BufReader};
 
@@ -14,7 +15,8 @@ mod store;
 mod transport;
 
 use crate::key::Key;
-use crate::node::{KademliaNode, OutEvent, QueryResult};
+use crate::node::{KademliaNode, OutEvent, PutRecordError, PutRecordOk, QueryResult};
+use crate::query::Quorum;
 use crate::store::Record;
 
 pub const K_VALUE: usize = 4;
@@ -91,7 +93,9 @@ async fn main() -> io::Result<()> {
 
                         };
 
-                        node.put_record(record).unwrap();
+                        // let q = Quorum::N(NonZeroUsize::new(2).unwrap());
+                        let q = Quorum::One;
+                        node.put_record(record, q).unwrap();
                     }
                     Some("GET") => {
                         let key = {
@@ -119,8 +123,17 @@ async fn main() -> io::Result<()> {
                                     println!("\t{node}");
                                 }
                             }
-                            QueryResult::PutRecord{ key } => {
-                                println!("> Put record {key} finished");
+                            QueryResult::PutRecord(result) => {
+                                match result {
+                                    Ok(PutRecordOk{ key }) => {
+                                        println!("> Put record {key} finished");
+                                    }
+                                    Err(err) => match err {
+                                        PutRecordError::QuorumFailed {key, successfull_peers, quorum } => {
+                                            println!("> Put record {key} quorm failed: {quorum} success: {successfull_peers:?}");
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
