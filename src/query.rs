@@ -37,12 +37,12 @@ impl QueryPool {
         }
 
         let query_id = self.next_query_id();
-        let peer_keys = peers
-            .into_iter()
-            .map(|Node { key, .. }| key)
-            .collect::<Vec<_>>();
+        // let peer_keys = peers
+        //     .into_iter()
+        //     .map(|Node { key, .. }| key)
+        //     .collect::<Vec<_>>();
 
-        let peers_iter = PeersIter::new(target, peer_keys);
+        let peers_iter = PeersIter::new(target, peers);
         let query = Query::new(peers_iter, info, query_id);
         self.queries.insert(query_id, query);
     }
@@ -119,8 +119,22 @@ pub struct Query {
 }
 
 #[derive(Debug)]
+pub struct QueryResultOutput {
+    pub nodes: Vec<Node>,
+    pub info: QueryInfo,
+}
+
+impl QueryResultOutput {
+    pub fn keys(self) -> Vec<Key> {
+        self.nodes.into_iter().map(|Node { key, .. }| key).collect()
+    }
+}
+
+#[derive(Debug)]
 pub enum PutRecordStep {
+    // Finding nodes responsible for storing the record
     FindNodes,
+    // Sending the record to the K nodes closest to the records key
     PutRecord { put_success: Vec<Key> },
 }
 
@@ -152,6 +166,7 @@ impl QueryInfo {
         }
     }
 }
+
 impl Query {
     pub fn new(peers_iter: PeersIter, info: QueryInfo, query_id: usize) -> Self {
         Self {
@@ -161,10 +176,6 @@ impl Query {
             waiting_events: Default::default(),
             query_info: info,
         }
-    }
-
-    pub fn id(&self) -> usize {
-        self.id
     }
 
     pub fn get_request(&self) -> KademliaEvent {
@@ -179,17 +190,23 @@ impl Query {
         self.waiting_events.remove(peer)
     }
 
-    pub fn get_peers(self) -> Vec<Key> {
-        self.peers_iter.get_peers()
+    pub fn result(self) -> QueryResultOutput {
+        let nodes = self.peers_iter.get_peers();
+
+        QueryResultOutput {
+            nodes,
+            info: self.query_info,
+        }
     }
 
     pub fn on_success(&mut self, peer: &Key, closer_peers: Vec<Node>, local_key: Key) {
         let other_peers = closer_peers
             .into_iter()
             .filter(|Node { key, .. }| key != &local_key)
-            .map(|Node { key, addr, .. }| {
-                self.discovered_addrs.insert(key.clone(), addr);
-                key
+            .map(|node| {
+                self.discovered_addrs
+                    .insert(node.key.clone(), node.addr.clone());
+                node
             })
             .collect();
 
@@ -218,14 +235,15 @@ pub struct PeersIter {
 }
 
 impl PeersIter {
-    pub fn new(target: Key, closest_peers: Vec<Key>) -> Self {
-        let closest_peers = BTreeMap::from_iter(closest_peers.into_iter().map(|key| {
-            let distance = key.distance(&target);
+    pub fn new(target: Key, closest_peers: Vec<Node>) -> Self {
+        let closest_peers = BTreeMap::from_iter(closest_peers.into_iter().map(|node| {
+            let distance = node.key.distance(&target);
             (
                 distance,
                 Peer {
-                    key,
+                    key: node.key,
                     state: PeerState::NotContacted,
+                    node,
                 },
             )
         }));
@@ -238,12 +256,12 @@ impl PeersIter {
         }
     }
 
-    pub fn get_peers(self) -> Vec<Key> {
+    pub fn get_peers(self) -> Vec<Node> {
         self.closest_peers
             .into_iter()
             .filter_map(|(_, peer)| {
                 if let PeerState::Succeeded = peer.state {
-                    Some(peer.key)
+                    Some(peer.node)
                 } else {
                     None
                 }
@@ -252,7 +270,7 @@ impl PeersIter {
             .collect()
     }
 
-    pub fn on_success(&mut self, peer_id: &Key, closer_peers: Vec<Key>) -> bool {
+    pub fn on_success(&mut self, peer_id: &Key, closer_peers: Vec<Node>) -> bool {
         if let PeersIterState::Finished = self.state {
             return false;
         }
@@ -274,11 +292,13 @@ impl PeersIter {
         }
 
         // Add `closer_peers` to the iterator
-        for key in closer_peers.into_iter() {
+        for node in closer_peers.into_iter() {
+            let key = node.key;
             let distance = self.target.distance(&key);
             let new_peer = Peer {
                 key,
                 state: PeerState::NotContacted,
+                node,
             };
 
             self.closest_peers.entry(distance).or_insert(new_peer);
@@ -347,4 +367,5 @@ enum PeerState {
 struct Peer {
     key: Key,
     state: PeerState,
+    node: Node,
 }

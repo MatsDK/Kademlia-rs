@@ -267,23 +267,45 @@ impl KademliaNode {
         None
     }
 
-    fn query_finished(&self, query: Query) -> Option<NodeEvent> {
-        match query.query_info {
+    fn query_finished(&mut self, query: Query) -> Option<NodeEvent> {
+        let query_result = query.result();
+        match query_result.info {
             QueryInfo::FindNode { target } => {
-                let peers = query.get_peers();
-
                 let out_ev = OutEvent::OutBoundQueryProgressed {
                     result: QueryResult::FindNode {
                         target,
-                        nodes: peers,
+                        nodes: query_result.keys(),
                     },
                 };
 
                 Some(NodeEvent::GenerateEvent(out_ev))
             }
-            QueryInfo::PutRecord { record, step } => {
+            QueryInfo::PutRecord {
+                record,
+                step: PutRecordStep::FindNodes,
+            } => {
+                let target = record.key.clone();
+
+                let query_info = QueryInfo::PutRecord {
+                    record,
+                    step: PutRecordStep::PutRecord {
+                        put_success: vec![],
+                    },
+                };
+
+                // TODO: make sure this is a fixed set of peers iterator for `query_result.nodes`
+                self.queries
+                    .add_query(target, query_result.nodes, query_info);
+
+                None
+            }
+            QueryInfo::PutRecord {
+                record,
+                step: PutRecordStep::PutRecord { .. },
+            } => {
+                // TODO: check if Quorum was successfull
                 let out_ev = OutEvent::OutBoundQueryProgressed {
-                    result: QueryResult::PutRecord {},
+                    result: QueryResult::PutRecord { key: record.key },
                 };
 
                 Some(NodeEvent::GenerateEvent(out_ev))
@@ -447,5 +469,5 @@ pub enum OutEvent {
 #[derive(Debug, Clone)]
 pub enum QueryResult {
     FindNode { nodes: Vec<Key>, target: Key },
-    PutRecord {},
+    PutRecord { key: Key },
 }

@@ -119,8 +119,8 @@ async fn main() -> io::Result<()> {
                                     println!("\t{node}");
                                 }
                             }
-                            QueryResult::PutRecord{.. } => {
-                                println!("> Put record finished");
+                            QueryResult::PutRecord{ key } => {
+                                println!("> Put record {key} finished");
                             }
                         }
                     }
