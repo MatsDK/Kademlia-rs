@@ -44,7 +44,9 @@ impl RecordStore {
         Ok(())
     }
 
-    fn remove(&mut self) {}
+    pub fn remove(&mut self, key: &Key) {
+        self.records.remove(key);
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

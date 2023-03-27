@@ -122,12 +122,21 @@ impl KademliaNode {
         Ok(())
     }
 
-    pub fn get_record(&mut self, key: Key) -> Option<&Record> {
-        if let Some(record) = self.store.get(&key) {
+    pub fn get_record(&mut self, key: &Key) -> Option<&Record> {
+        if let Some(record) = self.store.get(key) {
             return Some(record);
         }
 
         None
+    }
+
+    // Removes the record locally, only remove if you are the publisher
+    pub fn remove_record(&mut self, key: &Key) {
+        if let Some(record) = self.store.get(key) {
+            if record.publisher.as_ref() == Some(self.local_key()) {
+                self.store.remove(key)
+            }
+        }
     }
 
     pub fn local_key(&self) -> &Key {

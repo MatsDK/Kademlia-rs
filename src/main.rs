@@ -88,12 +88,12 @@ async fn main() -> io::Result<()> {
                         let record = Record {
                             key,
                             value,
-                            publisher: None,
+                            publisher: Some(node.local_key().clone()),
                             expires: None
 
                         };
 
-                        // let q = Quorum::N(NonZeroUsize::new(2).unwrap());
+                        // let q = Quorum::N(NonZeroUsize::new(4).unwrap());
                         let q = Quorum::One;
                         node.put_record(record, q).unwrap();
                     }
@@ -105,7 +105,17 @@ async fn main() -> io::Result<()> {
                             }
                         };
 
-                        println!("GET result: {:?}", node.get_record(key));
+                        println!("GET result(locally): {:?}", node.get_record(&key));
+                    }
+                    Some("REMOVE") => {
+                        let key = {
+                            match args.next() {
+                                Some(key) => Key::from_str(&key).unwrap(),
+                                None => Key::random()
+                            }
+                        };
+
+                        node.remove_record(&key);
                     }
                     _ => {}
                 }
