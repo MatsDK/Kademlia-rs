@@ -105,7 +105,9 @@ async fn main() -> io::Result<()> {
                             }
                         };
 
-                        println!("GET result(locally): {:?}", node.get_record(&key));
+                        if let Some(record) = node.get_record(&key) {
+                            println!("Found record locally: {record}");
+                        }
                     }
                     Some("REMOVE") => {
                         let key = {
@@ -144,6 +146,9 @@ async fn main() -> io::Result<()> {
                                         }
                                     }
                                 }
+                            }
+                            QueryResult::GetRecord {record} => {
+                                println!("Get record finished: {record}");
                             }
                         }
                     }
