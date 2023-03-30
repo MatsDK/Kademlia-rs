@@ -128,7 +128,10 @@ impl KademliaNode {
         }
 
         let peers = self.routing_table.closest_nodes(key);
-        let query_info = QueryInfo::GetRecord { key: key.clone() };
+        let query_info = QueryInfo::GetRecord {
+            key: key.clone(),
+            found_a_record: false,
+        };
 
         self.queries.add_query(*key, peers, query_info);
 
@@ -255,19 +258,28 @@ impl KademliaNode {
                 let local_key = self.local_key().clone();
 
                 if let Some(query) = self.queries.get_mut(&request_id) {
-                    query.on_success(&peer_id, vec![], local_key);
-
-                    if let Some(record) = record {
-                        let out_ev = OutEvent::OutBoundQueryProgressed {
-                            result: QueryResult::GetRecord { record },
-                        };
-                        self.queued_events
-                            .push_back(NodeEvent::GenerateEvent(out_ev));
+                    if let QueryInfo::GetRecord {
+                        ref mut found_a_record,
+                        ..
+                    } = query.query_info
+                    {
+                        if let Some(record) = record {
+                            *found_a_record = true;
+                            let out_ev = OutEvent::OutBoundQueryProgressed {
+                                result: QueryResult::GetRecord(GetRecordResult::FoundRecord(
+                                    record,
+                                )),
+                            };
+                            self.queued_events
+                                .push_back(NodeEvent::GenerateEvent(out_ev));
+                        }
                     }
                     // println!(
                     //     "Query: {query:?}, record received from {peer_id} {record}",
                     //     record = record.unwrap()
                     // );
+
+                    query.on_success(&peer_id, vec![], local_key);
                 }
             }
             KademliaEvent::Ping { .. } => {}
@@ -395,12 +407,22 @@ impl KademliaNode {
 
                 Some(NodeEvent::GenerateEvent(out_ev))
             }
-            QueryInfo::GetRecord { key } => {
+            QueryInfo::GetRecord {
+                key,
+                found_a_record,
+            } => {
+                if found_a_record {
+                    None
+                } else {
+                    let out_ev = OutEvent::OutBoundQueryProgressed {
+                        result: QueryResult::GetRecord(GetRecordResult::NotFound(key)),
+                    };
+                    Some(NodeEvent::GenerateEvent(out_ev))
+                }
                 // let out_ev = OutEvent::OutBoundQueryProgressed {
                 //     result: QueryResult::GetRecord { key },
                 // };
                 // Some(NodeEvent::GenerateEvent(out_ev))
-                None
             }
             QueryInfo::Bootstrap { .. } => {
                 // println!("first iteration of bootstrap complete");
@@ -437,6 +459,9 @@ impl KademliaNode {
                             self.queued_events
                                 .push_back(NodeEvent::Dial { peer_id: key })
                         }
+                    }
+                    QueryPoolState::TimeOut(q) => {
+                        println!(">> Query timed out: {q:?}");
                     }
                     QueryPoolState::Idle | QueryPoolState::Waiting(None) => break,
                 }
@@ -575,7 +600,7 @@ pub enum OutEvent {
 pub enum QueryResult {
     FindNode { nodes: Vec<Key>, target: Key },
     PutRecord(PutRecordResult),
-    GetRecord { record: Record },
+    GetRecord(GetRecordResult),
 }
 
 type PutRecordResult = Result<PutRecordOk, PutRecordError>;
@@ -592,4 +617,10 @@ pub enum PutRecordError {
         quorum: NonZeroUsize,
         successfull_peers: Vec<Key>,
     },
+}
+
+#[derive(Debug, Clone)]
+pub enum GetRecordResult {
+    FoundRecord(Record),
+    NotFound(Key),
 }

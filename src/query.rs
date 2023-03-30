@@ -1,6 +1,7 @@
 use std::{
     collections::{btree_map::Entry, BTreeMap, HashMap},
     num::NonZeroUsize,
+    time::{Duration, Instant},
 };
 
 use multiaddr::Multiaddr;
@@ -17,6 +18,7 @@ use crate::{
 pub enum QueryPoolState<'a> {
     Waiting(Option<(&'a mut Query, Key)>),
     Finished(Query),
+    TimeOut(Query),
     Idle,
 }
 
@@ -24,6 +26,7 @@ pub enum QueryPoolState<'a> {
 pub struct QueryPool {
     next_query_id: usize,
     queries: HashMap<usize, Query>,
+    query_timeout: Duration,
 }
 
 impl QueryPool {
@@ -31,6 +34,7 @@ impl QueryPool {
         Self {
             next_query_id: 0,
             queries: HashMap::new(),
+            query_timeout: Duration::from_secs(11),
         }
     }
 
@@ -75,13 +79,14 @@ impl QueryPool {
     }
 
     pub fn poll(&mut self) -> QueryPoolState<'_> {
-        // TODO: handle timeout events
+        let now = Instant::now();
 
         let mut waiting = None;
         let mut finished = None;
+        let mut timeout = None;
 
         for (&query_id, query) in self.queries.iter_mut() {
-            match query.next() {
+            match query.next(now) {
                 QueryState::Waiting(Some(peer)) => {
                     waiting = Some((query_id, peer));
                     break;
@@ -90,7 +95,18 @@ impl QueryPool {
                     finished = Some(query_id);
                     break;
                 }
-                QueryState::Waiting(None) | QueryState::Failed => {}
+                QueryState::Waiting(None) => {
+                    let time_elapsed = now - query.start;
+                    println!(
+                        "Query timed out: {} {}",
+                        time_elapsed.as_secs(),
+                        time_elapsed >= self.query_timeout
+                    );
+                    if time_elapsed >= self.query_timeout {
+                        timeout = Some(query_id);
+                        break;
+                    }
+                }
             }
         }
 
@@ -104,6 +120,11 @@ impl QueryPool {
             return QueryPoolState::Finished(query);
         }
 
+        if let Some(query_id) = timeout {
+            let query = self.queries.remove(&query_id).expect("Query not found");
+            return QueryPoolState::TimeOut(query);
+        }
+
         if self.queries.is_empty() {
             QueryPoolState::Idle
         } else {
@@ -115,16 +136,16 @@ impl QueryPool {
 pub enum QueryState {
     Finished,
     Waiting(Option<Key>),
-    Failed,
 }
 
 #[derive(Debug)]
 pub struct Query {
-    peers_iter: PeersIter,
     pub query_info: QueryInfo,
+    pub waiting_events: HashMap<Key, Vec<KademliaEvent>>,
+    peers_iter: PeersIter,
     id: usize,
     discovered_addrs: HashMap<Key, Multiaddr>,
-    pub waiting_events: HashMap<Key, Vec<KademliaEvent>>,
+    start: Instant,
 }
 
 #[derive(Debug)]
@@ -175,6 +196,7 @@ pub enum QueryInfo {
     },
     GetRecord {
         key: Key,
+        found_a_record: bool,
     },
     Bootstrap {
         target: Key,
@@ -204,7 +226,7 @@ impl QueryInfo {
                 target: target.clone(),
                 request_id,
             },
-            QueryInfo::GetRecord { key } => KademliaEvent::GetRecordReq {
+            QueryInfo::GetRecord { key, .. } => KademliaEvent::GetRecordReq {
                 key: *key,
                 request_id,
             },
@@ -220,6 +242,7 @@ impl Query {
             discovered_addrs: Default::default(),
             waiting_events: Default::default(),
             query_info: info,
+            start: Instant::now(),
         }
     }
 
@@ -267,8 +290,8 @@ impl Query {
         self.peers_iter.on_failure(peer);
     }
 
-    pub fn next(&mut self) -> QueryState {
-        self.peers_iter.next()
+    pub fn next(&mut self, now: Instant) -> QueryState {
+        self.peers_iter.next(now)
     }
 }
 
@@ -286,6 +309,7 @@ pub struct PeersIter {
     closest_peers: BTreeMap<Distance, Peer>,
     num_waiting: usize,
     num_results: usize,
+    peer_timeout: Duration,
 }
 
 impl PeersIter {
@@ -307,6 +331,7 @@ impl PeersIter {
             closest_peers,
             num_waiting: 0,
             num_results: K_VALUE,
+            peer_timeout: Duration::from_secs(10),
         }
     }
 
@@ -338,7 +363,7 @@ impl PeersIter {
         match self.closest_peers.entry(distance) {
             Entry::Vacant(..) => return,
             Entry::Occupied(mut e) => match e.get().state {
-                PeerState::Waiting => {
+                PeerState::Waiting(_) => {
                     self.num_waiting -= 1;
                     e.get_mut().state = PeerState::Succeeded;
                 }
@@ -378,19 +403,19 @@ impl PeersIter {
         let distance = peer.distance(&self.target);
         // Update the state of the failed peer
         match self.closest_peers.entry(distance) {
-            Entry::Vacant(..) => return,
             Entry::Occupied(mut e) => match e.get().state {
-                PeerState::Waiting => {
+                PeerState::Waiting(_) => {
                     self.num_waiting -= 1;
                     e.get_mut().state = PeerState::Failed;
                 }
                 PeerState::Unresponsive => e.get_mut().state = PeerState::Failed,
-                PeerState::NotContacted | PeerState::Failed | PeerState::Succeeded => return,
+                PeerState::NotContacted | PeerState::Failed | PeerState::Succeeded => {}
             },
+            Entry::Vacant(..) => {}
         }
     }
 
-    pub fn next(&mut self) -> QueryState {
+    pub fn next(&mut self, now: Instant) -> QueryState {
         if let PeersIterState::Finished = self.state {
             return QueryState::Finished;
         }
@@ -403,11 +428,15 @@ impl PeersIter {
                     // TODO: check if 'self.num_waiting' is below some maximum
 
                     self.num_waiting += 1;
-                    peer.state = PeerState::Waiting;
+                    let timeout = now + self.peer_timeout;
+                    peer.state = PeerState::Waiting(timeout);
                     return QueryState::Waiting(Some(peer.key.clone()));
                 }
-                PeerState::Waiting => {
-                    // TODO: check for timeout, set to unresponsive
+                PeerState::Waiting(timeout) => {
+                    if now >= timeout {
+                        self.num_waiting -= 1;
+                        peer.state = PeerState::Unresponsive
+                    }
                 }
                 PeerState::Succeeded => {
                     result_counter += 1;
@@ -434,7 +463,7 @@ impl PeersIter {
 #[derive(Debug)]
 enum PeerState {
     NotContacted,
-    Waiting,
+    Waiting(Instant),
     Succeeded,
     Unresponsive,
     Failed,

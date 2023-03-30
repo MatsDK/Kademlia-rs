@@ -15,7 +15,9 @@ mod store;
 mod transport;
 
 use crate::key::Key;
-use crate::node::{KademliaNode, OutEvent, PutRecordError, PutRecordOk, QueryResult};
+use crate::node::{
+    GetRecordResult, KademliaNode, OutEvent, PutRecordError, PutRecordOk, QueryResult,
+};
 use crate::query::Quorum;
 use crate::store::Record;
 
@@ -135,21 +137,24 @@ async fn main() -> io::Result<()> {
                                     println!("\t{node}");
                                 }
                             }
-                            QueryResult::PutRecord(result) => {
-                                match result {
-                                    Ok(PutRecordOk{ key }) => {
-                                        println!("> Put record {key} finished");
-                                    }
-                                    Err(err) => match err {
-                                        PutRecordError::QuorumFailed {key, successfull_peers, quorum } => {
-                                            println!("> Put record {key} quorm failed: {quorum} success: {successfull_peers:?}");
-                                        }
+                            QueryResult::PutRecord(result) => match result {
+                                Ok(PutRecordOk{ key }) => {
+                                    println!("> Put record {key} finished");
+                                }
+                                Err(err) => match err {
+                                    PutRecordError::QuorumFailed {key, successfull_peers, quorum } => {
+                                        println!("> Put record {key} quorm failed: {quorum} success: {successfull_peers:?}");
                                     }
                                 }
-                            }
-                            QueryResult::GetRecord {record} => {
-                                println!("Get record finished: {record}");
-                            }
+                            },
+                            QueryResult::GetRecord(result) => match result {
+                                GetRecordResult::FoundRecord(record) => {
+                                    println!("> Get record finished: {record}");
+                                }
+                                GetRecordResult::NotFound(key) => {
+                                    println!("> Get record {key} failed: NotFound")
+                                }
+                            },
                         }
                     }
                     OutEvent::Other => {}
