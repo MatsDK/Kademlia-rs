@@ -66,20 +66,20 @@ impl KademliaNode {
     pub fn dial_with_peer_id(&mut self, peer: Key) -> Result<(), ()> {
         let addr = self.find_addr_for_peer(&peer);
         if let Some(addr) = addr {
-            let dial = match self.transport.dial(&addr) {
-                Err(e) => {
-                    eprintln!("{:?}", e);
-                    return Err(());
-                }
-                Ok(dial) => dial,
-            };
+            self.dial(addr.clone())
+            // let dial = match self.transport.dial(&addr) {
+            //     Err(e) => {
+            //         eprintln!("{:?}", e);
+            //         return Err(());
+            //     }
+            //     Ok(dial) => dial,
+            // };
 
-            self.pool.add_outgoing(dial, addr.clone());
+            // self.pool.add_outgoing(dial, addr.clone());
         } else {
-            eprintln!("There is no addr in routing table for {peer}")
+            eprintln!("There is no addr in routing table for {peer}");
+            Err(())
         }
-
-        Ok(())
     }
 
     pub fn find_addr_for_peer(&self, peer: &Key) -> Option<&Multiaddr> {
@@ -142,7 +142,7 @@ impl KademliaNode {
     pub fn remove_record(&mut self, key: &Key) {
         if let Some(record) = self.store.get(key) {
             if record.publisher.as_ref() == Some(self.local_key()) {
-                self.store.remove(key)
+                self.store.remove(key);
             }
         }
     }

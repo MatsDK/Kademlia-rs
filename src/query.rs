@@ -34,7 +34,7 @@ impl QueryPool {
         Self {
             next_query_id: 0,
             queries: HashMap::new(),
-            query_timeout: Duration::from_secs(11),
+            query_timeout: Duration::from_secs(60),
         }
     }
 
@@ -97,11 +97,6 @@ impl QueryPool {
                 }
                 QueryState::Waiting(None) => {
                     let time_elapsed = now - query.start;
-                    println!(
-                        "Query timed out: {} {}",
-                        time_elapsed.as_secs(),
-                        time_elapsed >= self.query_timeout
-                    );
                     if time_elapsed >= self.query_timeout {
                         timeout = Some(query_id);
                         break;

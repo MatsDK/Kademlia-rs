@@ -1,8 +1,5 @@
 use core::fmt;
-use std::{
-    collections::{hash_map::Entry, HashMap},
-    time::Duration,
-};
+use std::collections::{hash_map::Entry, HashMap};
 
 use serde::{Deserialize, Serialize};
 
@@ -54,7 +51,6 @@ pub struct Record {
     pub key: Key,
     pub value: Vec<u8>,
     pub publisher: Option<Key>,
-    pub expires: Option<Duration>,
 }
 
 impl fmt::Display for Record {

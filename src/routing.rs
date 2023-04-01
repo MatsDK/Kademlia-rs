@@ -65,6 +65,7 @@ impl KBucket {
     fn insert(&mut self, node: Node) {
         // TODO: If the bucket is full we should check if there is a disconnected node
         if self.nodes.is_full() {
+            println!("bucket is full");
             return;
         }
 

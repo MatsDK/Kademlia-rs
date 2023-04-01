@@ -2,7 +2,6 @@ use clap::Parser;
 use futures::StreamExt;
 use multiaddr::Multiaddr;
 use std::io;
-use std::num::NonZeroUsize;
 use std::str::FromStr;
 use tokio::io::{stdin, AsyncBufReadExt, BufReader};
 
@@ -21,7 +20,7 @@ use crate::node::{
 use crate::query::Quorum;
 use crate::store::Record;
 
-pub const K_VALUE: usize = 4;
+pub const K_VALUE: usize = 1;
 static BOOTSTRAP_NODE_KEY: &str = "5zrr7BPc5gnMV6EbdpPfxpoJfZuddRH8PK1EQQmEAPFw";
 
 #[derive(Parser, Debug)]
@@ -30,7 +29,7 @@ struct Args {
     #[arg(short, long)]
     addr: Multiaddr,
 
-    /// Dial an other peer with addr, None for bootstrapping peer
+    /// Dial another peer by addr, None for bootstrapping peer
     #[arg(short, long)]
     dial: Option<Multiaddr>,
 }
@@ -91,8 +90,6 @@ async fn main() -> io::Result<()> {
                             key,
                             value,
                             publisher: Some(node.local_key().clone()),
-                            expires: None
-
                         };
 
                         // let q = Quorum::N(NonZeroUsize::new(4).unwrap());
