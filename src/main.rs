@@ -20,7 +20,7 @@ use crate::node::{
 use crate::query::Quorum;
 use crate::store::Record;
 
-pub const K_VALUE: usize = 1;
+pub const K_VALUE: usize = 2;
 static BOOTSTRAP_NODE_KEY: &str = "5zrr7BPc5gnMV6EbdpPfxpoJfZuddRH8PK1EQQmEAPFw";
 
 #[derive(Parser, Debug)]
@@ -152,6 +152,9 @@ async fn main() -> io::Result<()> {
                                     println!("> Get record {key} failed: NotFound")
                                 }
                             },
+                            QueryResult::Bootstrap => {
+                                println!("> Successfull bootstrap")
+                            }
                         }
                     }
                     OutEvent::Other => {}

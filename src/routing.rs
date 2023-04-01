@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use arrayvec::ArrayVec;
 use multiaddr::Multiaddr;
 use serde::{Deserialize, Serialize};
@@ -6,79 +8,6 @@ use crate::{
     key::{Distance, Key},
     K_VALUE,
 };
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum NodeStatus {
-    Connected,
-    Disconnected,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Node {
-    pub key: Key,
-    pub addr: Multiaddr,
-    pub status: NodeStatus,
-}
-
-#[derive(Debug)]
-struct KBucket {
-    // nodes: ArrayVec<(Key, Multiaddr), { K_VALUE }>,
-    nodes: ArrayVec<Node, { K_VALUE }>,
-}
-
-impl KBucket {
-    fn new() -> Self {
-        Self {
-            nodes: ArrayVec::new(),
-        }
-    }
-
-    fn get_keys(&self) -> Vec<Key> {
-        self.nodes
-            .iter()
-            .map(|Node { key, .. }| key.clone())
-            .collect()
-    }
-
-    fn get_nodes(&self) -> Vec<Node> {
-        self.nodes.to_vec()
-    }
-
-    fn get_node(&self, key: Key) -> Option<&Node> {
-        self.nodes.iter().find(|n| n.key == key)
-    }
-
-    fn get_index(&self, key: Key) -> Option<usize> {
-        self.nodes.iter().position(|n| n.key == key)
-    }
-
-    fn remove(&mut self, key: Key) -> Option<Node> {
-        if let Some(i) = self.get_index(key) {
-            let node = self.nodes.remove(i);
-
-            Some(node)
-        } else {
-            None
-        }
-    }
-
-    fn insert(&mut self, node: Node) {
-        // TODO: If the bucket is full we should check if there is a disconnected node
-        if self.nodes.is_full() {
-            println!("bucket is full");
-            return;
-        }
-
-        self.nodes.push(node);
-    }
-
-    fn update(&mut self, key: Key, status: NodeStatus) {
-        if let Some(mut node) = self.remove(key) {
-            node.status = status;
-            self.insert(node);
-        }
-    }
-}
 
 #[derive(Debug)]
 pub struct RoutingTable {
@@ -114,11 +43,15 @@ impl RoutingTable {
                 }
                 None => {
                     if let Some(addr) = addr {
-                        bucket.insert(Node {
+                        match bucket.insert(Node {
                             key: target,
                             addr,
                             status: new_status,
-                        })
+                        }) {
+                            InsertResult::Inserted => {}
+                            InsertResult::Pending { disconnected } => {}
+                            InsertResult::Full => {}
+                        }
                     }
                 }
             }
@@ -203,5 +136,145 @@ impl BucketIndex {
 
     fn index(&self) -> usize {
         self.0
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum NodeStatus {
+    Connected,
+    Disconnected,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Node {
+    pub key: Key,
+    pub addr: Multiaddr,
+    pub status: NodeStatus,
+}
+
+#[derive(Debug)]
+struct KBucket {
+    // The nodes stored in the bucket ordered from least-recently connected to
+    // most-recentrly connected.
+    nodes: ArrayVec<Node, { K_VALUE }>,
+
+    // The index in `nodes` that indicates the position of the first connected node.
+    //
+    // All nodes above this index are considered connected, i.e. the range
+    // `[0, first_connected_idx)` indicates the range of nodes that are
+    // considered disconnected and the range, `[first_connected_idx, K_VALUE)`
+    // is the range of nodes that are considered connected
+    first_connected_idx: Option<usize>,
+
+    // A node that is waiting to be possibely inserted into a full bucket
+    pending: Option<PendingNode>,
+
+    // The duration a pending node should wait before being inserted into a full bucket.
+    // During this timeout the least-recently connected node may re-connect.
+    pending_timeout: Duration,
+}
+
+#[derive(Debug)]
+struct PendingNode {
+    // The node pending to be inserted.
+    node: Node,
+
+    // The instant at which it is OK to insert into the bucket.
+    insert_instant: Instant,
+}
+
+pub enum InsertResult {
+    Inserted,
+    Pending { disconnected: Key },
+    Full,
+}
+
+impl KBucket {
+    fn new() -> Self {
+        Self {
+            nodes: ArrayVec::new(),
+            first_connected_idx: None,
+            pending: None,
+            pending_timeout: Duration::from_secs(10),
+        }
+    }
+
+    fn get_keys(&self) -> Vec<Key> {
+        self.nodes
+            .iter()
+            .map(|Node { key, .. }| key.clone())
+            .collect()
+    }
+
+    fn get_nodes(&self) -> Vec<Node> {
+        self.nodes.to_vec()
+    }
+
+    fn get_node(&self, key: Key) -> Option<&Node> {
+        self.nodes.iter().find(|n| n.key == key)
+    }
+
+    fn get_index(&self, key: Key) -> Option<usize> {
+        self.nodes.iter().position(|n| n.key == key)
+    }
+
+    fn remove(&mut self, key: Key) -> Option<Node> {
+        if let Some(i) = self.get_index(key) {
+            let node = self.nodes.remove(i);
+
+            Some(node)
+        } else {
+            None
+        }
+    }
+
+    fn insert(&mut self, node: Node) -> InsertResult {
+        match node.status {
+            NodeStatus::Connected => {
+                if self.nodes.is_full() {
+                    // All nodes in this bucket are considered connected.
+                    if self.first_connected_idx == Some(0) {
+                        return InsertResult::Full;
+                    } else {
+                        self.pending = Some(PendingNode {
+                            node,
+                            insert_instant: Instant::now() + self.pending_timeout,
+                        });
+                        return InsertResult::Pending {
+                            disconnected: self.nodes[0].key,
+                        };
+                    }
+                }
+
+                // If there is no connected node in the bucket, set `first_connected_idx` to the
+                // last element in the list.
+                self.first_connected_idx.or(Some(self.nodes.len()));
+                self.nodes.push(node);
+                InsertResult::Inserted
+            }
+            NodeStatus::Disconnected => {
+                if self.nodes.is_full() {
+                    return InsertResult::Full;
+                }
+
+                // The bucket is not full so insert before the first connected node and increase
+                // `first_connected_idx` by 1.
+                if let Some(ref mut first_connected_idx) = self.first_connected_idx {
+                    self.nodes.insert(*first_connected_idx, node);
+                    *first_connected_idx += 1;
+                } else {
+                    self.nodes.push(node);
+                }
+
+                InsertResult::Inserted
+            }
+        }
+    }
+
+    fn update(&mut self, key: Key, status: NodeStatus) {
+        if let Some(mut node) = self.remove(key) {
+            node.status = status;
+            self.insert(node);
+        }
     }
 }

@@ -67,15 +67,6 @@ impl KademliaNode {
         let addr = self.find_addr_for_peer(&peer);
         if let Some(addr) = addr {
             self.dial(addr.clone())
-            // let dial = match self.transport.dial(&addr) {
-            //     Err(e) => {
-            //         eprintln!("{:?}", e);
-            //         return Err(());
-            //     }
-            //     Ok(dial) => dial,
-            // };
-
-            // self.pool.add_outgoing(dial, addr.clone());
         } else {
             eprintln!("There is no addr in routing table for {peer}");
             Err(())
@@ -425,14 +416,16 @@ impl KademliaNode {
                 // Some(NodeEvent::GenerateEvent(out_ev))
             }
             QueryInfo::Bootstrap { .. } => {
-                // println!("first iteration of bootstrap complete");
                 // TODO: should refresh some buckets
-                None
+                let out_ev = OutEvent::OutBoundQueryProgressed {
+                    result: QueryResult::Bootstrap,
+                };
+                Some(NodeEvent::GenerateEvent(out_ev))
             }
         }
     }
 
-    fn poll_next_query(&mut self, cx: &mut Context<'_>) -> Poll<NodeEvent> {
+    fn poll_next_query(&mut self) -> Poll<NodeEvent> {
         loop {
             // first get all the queued events from previous iterations
             if let Some(ev) = self.queued_events.pop_front() {
@@ -495,7 +488,7 @@ impl KademliaNode {
                 }
                 None => {
                     // Poll next query
-                    match self.poll_next_query(cx) {
+                    match self.poll_next_query() {
                         Poll::Pending => {}
                         Poll::Ready(ev) => {
                             if let Some(NodeEvent::GenerateEvent(ev)) =
@@ -601,6 +594,7 @@ pub enum QueryResult {
     FindNode { nodes: Vec<Key>, target: Key },
     PutRecord(PutRecordResult),
     GetRecord(GetRecordResult),
+    Bootstrap,
 }
 
 type PutRecordResult = Result<PutRecordOk, PutRecordError>;
