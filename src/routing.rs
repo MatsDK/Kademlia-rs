@@ -218,13 +218,94 @@ impl KBucket {
         self.nodes.iter().position(|n| n.key == key)
     }
 
-    fn remove(&mut self, key: Key) -> Option<Node> {
+    fn remove(&mut self, key: Key) -> Option<(Node, usize)> {
         if let Some(i) = self.get_index(key) {
             let node = self.nodes.remove(i);
 
-            Some(node)
+            // Update `first_connected_idx` according to the status of the removed node.
+            match node.status {
+                NodeStatus::Connected => {
+                    if self.first_connected_idx.map_or(false, |idx| idx == i)
+                        && i == self.nodes.len()
+                    {
+                        // The removed node was the only node considered connected.
+                        self.first_connected_idx = None
+                    }
+                }
+                NodeStatus::Disconnected => {
+                    if let Some(ref mut idx) = self.first_connected_idx {
+                        *idx -= 1;
+                    }
+                }
+            }
+
+            Some((node, i))
         } else {
             None
+        }
+    }
+
+    // Inserts the pending node into the bucket if the timeout has elapsed, replacing the
+    // least-recently connected node, `self.nodes[0]`. This should be called every time this bucket
+    // is accessed.
+    fn apply_pending(&mut self) {
+        let now = Instant::now();
+        let pending = match self.pending.take() {
+            Some(p) => p,
+            None => return,
+        };
+
+        if pending.insert_instant > now {
+            // The pending node must continue to wait until the timeout has elapsed.
+            self.pending = Some(pending);
+            return;
+        }
+
+        // The node waited for `pending_timeout`, at this point the node can possibely be
+        // inserted into the bucket.
+        if self.nodes.is_full() {
+            if self.nodes[0].status == NodeStatus::Connected {
+                // The bucket is completely occupied by connected nodes so drop the pending node.
+                return;
+            }
+
+            if pending.node.status == NodeStatus::Disconnected {
+                let _removed = self.nodes.remove(0);
+
+                // Decrease `first_connected_idx` because a disconnected node is replaced with the
+                // connected pending node.
+                self.first_connected_idx = self
+                    .first_connected_idx
+                    .map_or_else(|| Some(self.nodes.len()), |idx| idx.checked_sub(1));
+
+                self.nodes.push(pending.node);
+            } else if let Some(idx) = self.first_connected_idx {
+                // If the pending node is disconnected, it should be inserted at the end of the
+                // disconnected nodes list, `first_connected_idx` - 1
+                let _removed = self.nodes.remove(0);
+
+                let insert_idx = idx.checked_sub(1).expect("subtract 1 from index");
+                self.nodes.insert(insert_idx, pending.node);
+            } else {
+                // All nodes in the bucket are disconnected, insert the pending node at the end as
+                // the most recently disconnected node.
+                let _removed = self.nodes.remove(0);
+
+                self.nodes.push(pending.node);
+            }
+        } else {
+            match self.insert(pending.node) {
+                InsertResult::Inserted => {}
+                _ => unreachable!("Should be able to insert, bucket is not full"),
+            }
+        }
+    }
+
+    pub fn status(&self, pos: usize) -> NodeStatus {
+        if self.first_connected_idx.map_or(false, |i| pos >= i) {
+            NodeStatus::Connected
+        } else {
+            NodeStatus::Disconnected
         }
     }
 
@@ -272,8 +353,16 @@ impl KBucket {
     }
 
     fn update(&mut self, key: Key, status: NodeStatus) {
-        if let Some(mut node) = self.remove(key) {
+        // Remove the node and reinsert it somewhere in the list depending on the new status.
+        if let Some((mut node, idx)) = self.remove(key) {
             node.status = status;
+
+            // If the least-recently connected node reconnects, drop the pending node that was
+            // waiting for this node to reconnect.
+            if idx == 0 && node.status == NodeStatus::Connected {
+                self.pending = None;
+            }
+
             self.insert(node);
         }
     }

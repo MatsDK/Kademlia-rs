@@ -153,10 +153,6 @@ impl KademliaNode {
             .update_node_status(key.clone(), Some(addr), status);
     }
 
-    // fn update_node_status(&mut self, key: Key, addr: Option<Multiaddr>, status: NodeStatus) {
-    //     self.routing_table.update_node_status(key, addr, status);
-    // }
-
     pub fn find_node(&mut self, target: &Key) {
         let peers = self.routing_table.closest_nodes(target);
 
