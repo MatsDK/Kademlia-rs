@@ -233,15 +233,22 @@ impl KademliaNode {
             }
             KademliaEvent::GetRecordReq { key, request_id } => {
                 let record = self.store.get(&key);
+                let closer_nodes = self.routing_table.closest_nodes(&key);
+
                 self.queued_events.push_back(NodeEvent::Notify {
                     peer_id,
                     event: KademliaEvent::GetRecordRes {
                         record: record.cloned(),
+                        closer_nodes,
                         request_id,
                     },
                 })
             }
-            KademliaEvent::GetRecordRes { record, request_id } => {
+            KademliaEvent::GetRecordRes {
+                record,
+                request_id,
+                closer_nodes,
+            } => {
                 let local_key = self.local_key().clone();
 
                 if let Some(query) = self.queries.get_mut(&request_id) {
@@ -261,12 +268,8 @@ impl KademliaNode {
                                 .push_back(NodeEvent::GenerateEvent(out_ev));
                         }
                     }
-                    // println!(
-                    //     "Query: {query:?}, record received from {peer_id} {record}",
-                    //     record = record.unwrap()
-                    // );
 
-                    query.on_success(&peer_id, vec![], local_key);
+                    query.on_success(&peer_id, closer_nodes, local_key);
                 }
             }
             KademliaEvent::Ping { .. } => {}
@@ -277,8 +280,8 @@ impl KademliaNode {
         match ev {
             PoolEvent::NewConnection { key, remote_addr } => {
                 let endpoint = socketaddr_to_multiaddr(&remote_addr);
-                self.add_address(&key, endpoint);
                 self.connected_peers.insert(key.clone());
+                self.add_address(&key, endpoint);
 
                 // Once the connection is established send all the queued events to that peer.
                 for event in self
@@ -564,6 +567,7 @@ pub enum KademliaEvent {
     },
     GetRecordRes {
         record: Option<Record>,
+        closer_nodes: Vec<Node>,
         request_id: usize,
     },
     Ping {
