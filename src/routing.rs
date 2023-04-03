@@ -28,36 +28,42 @@ impl RoutingTable {
         target: Key,
         addr: Option<Multiaddr>,
         new_status: NodeStatus,
-    ) {
+    ) -> UpdateResult {
         let d = &self.local_key.distance(&target);
         let bucket_idx = BucketIndex::new(d);
 
         if let Some(i) = bucket_idx {
             let bucket = &mut self.kbuckets[i.index()];
+            bucket.apply_pending();
 
             match bucket.get_node(target) {
                 Some(node) => {
                     if node.status != new_status {
                         bucket.update(target, new_status);
+                        return UpdateResult::Updated;
                     }
                 }
                 None => {
                     if let Some(addr) = addr {
-                        match bucket.insert(Node {
+                        return match bucket.insert(Node {
                             key: target,
                             addr,
                             status: new_status,
                         }) {
-                            InsertResult::Inserted => {}
-                            InsertResult::Pending { disconnected } => {}
-                            InsertResult::Full => {}
-                        }
+                            InsertResult::Inserted => UpdateResult::Updated,
+                            InsertResult::Pending { disconnected } => {
+                                UpdateResult::Pending { disconnected }
+                            }
+                            InsertResult::Full => UpdateResult::Failed,
+                        };
                     }
                 }
             }
         } else {
             eprintln!("SelfEntry");
         }
+
+        UpdateResult::Failed
     }
 
     pub fn closest_nodes(&mut self, target: &Key) -> Vec<Node> {
@@ -73,13 +79,18 @@ impl RoutingTable {
         }
 
         let index = bucket_idx.unwrap().index();
+        let bucket = &mut self.kbuckets[index];
+        bucket.apply_pending();
 
-        closest.append(&mut self.kbuckets[index].get_nodes());
+        closest.append(&mut bucket.get_nodes());
 
         // Look for the closest on the left if less than K closest found
         if closest.len() < K_VALUE {
             for i in (0..index).rev() {
-                closest.append(&mut self.kbuckets[i].get_nodes());
+                let bucket = &mut self.kbuckets[i];
+                bucket.apply_pending();
+
+                closest.append(&mut bucket.get_nodes());
                 if closest.len() >= K_VALUE {
                     break;
                 }
@@ -89,7 +100,10 @@ impl RoutingTable {
         // Now look for the closest on the right if less than K closest found
         if closest.len() < K_VALUE {
             for i in (index + 1)..256 {
-                closest.append(&mut self.kbuckets[i].get_nodes());
+                let bucket = &mut self.kbuckets[i];
+                bucket.apply_pending();
+
+                closest.append(&mut bucket.get_nodes());
                 if closest.len() >= K_VALUE {
                     break;
                 }
@@ -113,6 +127,7 @@ impl RoutingTable {
 
         if let Some(i) = bucket_idx {
             let bucket = &self.kbuckets[i.index()];
+            // bucket.apply_pending();
 
             return bucket
                 .nodes
@@ -181,6 +196,12 @@ struct PendingNode {
 
     // The instant at which it is OK to insert into the bucket.
     insert_instant: Instant,
+}
+
+pub enum UpdateResult {
+    Updated,
+    Pending { disconnected: Key },
+    Failed,
 }
 
 pub enum InsertResult {

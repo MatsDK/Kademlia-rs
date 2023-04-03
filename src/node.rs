@@ -13,7 +13,7 @@ use crate::{
     key::Key,
     pool::{Pool, PoolEvent},
     query::{PutRecordStep, Query, QueryInfo, QueryPool, QueryPoolState, Quorum},
-    routing::{Node, NodeStatus, RoutingTable},
+    routing::{Node, NodeStatus, RoutingTable, UpdateResult},
     store::{Record, RecordStore},
     transport::{socketaddr_to_multiaddr, Transport, TransportEvent},
 };
@@ -149,8 +149,24 @@ impl KademliaNode {
             NodeStatus::Disconnected
         };
 
-        self.routing_table
-            .update_node_status(key.clone(), Some(addr), status);
+        self.update_node_status(key.clone(), Some(addr), status);
+    }
+
+    pub fn update_node_status(&mut self, target: Key, addr: Option<Multiaddr>, status: NodeStatus) {
+        match self.routing_table.update_node_status(target, addr, status) {
+            UpdateResult::Pending { disconnected } => {
+                if !self.connected_peers.contains(&disconnected) {
+                    // Dial the least-recently disconnected node, if it reconnects after dialing
+                    // its status will be set to connected and the pending node will be dropped.
+                    self.queued_events.push_back(NodeEvent::Dial {
+                        peer_id: disconnected,
+                    });
+                }
+            }
+            // UpdateResult::Updated => {}
+            // UpdateResult::Failed => {}
+            _ => {}
+        }
     }
 
     pub fn find_node(&mut self, target: &Key) {
@@ -281,7 +297,7 @@ impl KademliaNode {
             PoolEvent::NewConnection { key, remote_addr } => {
                 let endpoint = socketaddr_to_multiaddr(&remote_addr);
                 self.connected_peers.insert(key.clone());
-                self.add_address(&key, endpoint);
+                self.update_node_status(key, Some(endpoint), NodeStatus::Connected);
 
                 // Once the connection is established send all the queued events to that peer.
                 for event in self
@@ -309,8 +325,7 @@ impl KademliaNode {
                 }
                 self.connected_peers.remove(&key);
 
-                self.routing_table
-                    .update_node_status(key, None, NodeStatus::Disconnected);
+                self.update_node_status(key, None, NodeStatus::Disconnected);
 
                 eprintln!("Connection closed with message: {}", error);
             }
