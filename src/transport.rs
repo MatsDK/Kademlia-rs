@@ -9,6 +9,8 @@ use std::{
 };
 use tokio::net::TcpListener;
 
+use crate::node::KademliaEvent;
+
 #[derive(Debug)]
 pub struct Transport {
     listener: TcpListenStream,
@@ -131,6 +133,37 @@ pub struct TcpStream(pub tokio::net::TcpStream);
 impl From<TcpStream> for tokio::net::TcpStream {
     fn from(t: TcpStream) -> tokio::net::TcpStream {
         t.0
+    }
+}
+
+impl TcpStream {
+    pub async fn read_ev(&mut self) -> Poll<Result<KademliaEvent, String>> {
+        let mut buf = vec![0; 1024];
+
+        loop {
+            let bytes_read = self.read(&mut buf).await;
+            let bytes_read = match bytes_read {
+                Ok(b) => b,
+                Err(e) => {
+                    return Poll::Ready(Err(format!("Error reading stream: {e}")));
+                }
+            };
+
+            if bytes_read == 0 {
+                // continue
+                return Poll::Pending;
+            }
+
+            return match bincode::deserialize::<KademliaEvent>(&buf[..bytes_read]) {
+                Ok(event) => Poll::Ready(Ok(event)),
+                Err(e) => Poll::Ready(Err(format!("failed to deserialize: {e}"))),
+            };
+        }
+    }
+
+    pub async fn write_ev(&mut self, ev: KademliaEvent) -> Result<(), std::io::Error> {
+        let ev = bincode::serialize(&ev).unwrap();
+        self.write_all(&ev).await
     }
 }
 

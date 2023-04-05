@@ -1,5 +1,5 @@
 use futures::channel::mpsc;
-use futures::{AsyncReadExt, AsyncWriteExt, SinkExt, StreamExt};
+use futures::{SinkExt, StreamExt};
 use multiaddr::Multiaddr;
 use std::collections::HashMap;
 use std::task::{Context, Poll};
@@ -66,18 +66,23 @@ impl Pool {
     pub fn poll(&mut self, cx: &mut Context<'_>) -> Poll<PoolEvent> {
         // Prioritize established connections.
         match self.established_connections_rx.poll_next_unpin(cx) {
-            Poll::Pending => {}
-            Poll::Ready(None) => {}
-            Poll::Ready(Some(EstablishedConnectionEvent::Error(_error))) => {}
             Poll::Ready(Some(EstablishedConnectionEvent::Closed { key, error })) => {
-                self.connections
+                let closed_conn = self
+                    .connections
                     .remove(&key)
                     .expect("Connection is established");
-                return Poll::Ready(PoolEvent::ConnectionClosed { key, error });
+
+                return Poll::Ready(PoolEvent::ConnectionClosed {
+                    key,
+                    error,
+                    remote_addr: closed_conn.endpoint,
+                });
             }
             Poll::Ready(Some(EstablishedConnectionEvent::Event { key, event })) => {
                 return Poll::Ready(PoolEvent::Request { key, event })
             }
+            Poll::Pending => {}
+            Poll::Ready(None) => {}
         }
 
         loop {
@@ -117,11 +122,8 @@ impl Pool {
 
                     return Poll::Ready(PoolEvent::NewConnection { key, remote_addr });
                 }
-                PendingConnectionEvent::ConnectionFailed(e) => {
-                    println!("Got error: {e}");
-                }
-                PendingConnectionEvent::Error(e) => {
-                    eprintln!("Got error: {e}");
+                PendingConnectionEvent::ConnectionFailed { error, remote_addr } => {
+                    return Poll::Ready(PoolEvent::ConnectionFailed { error, remote_addr })
                 }
             };
         }
@@ -138,37 +140,11 @@ pub struct Connection {
 
 impl Connection {
     pub async fn poll_read_stream(&mut self) -> Poll<Result<KademliaEvent, String>> {
-        let mut buf = vec![0; 1024];
-
-        loop {
-            let bytes_read = self.stream.read(&mut buf).await;
-            let bytes_read = match bytes_read {
-                Ok(b) => b,
-                Err(e) => {
-                    return Poll::Ready(Err("Error reading stream".to_string()));
-                }
-            };
-
-            if bytes_read == 0 {
-                // continue
-                return Poll::Pending;
-            }
-
-            return match bincode::deserialize::<KademliaEvent>(&buf[..bytes_read]) {
-                Ok(event) => Poll::Ready(Ok(event)),
-                Err(e) => {
-                    println!("Failed to deserialize: {e}");
-                    Poll::Ready(Err("failed to deserialize".to_string()))
-                }
-            };
-        }
+        self.stream.read_ev().await
     }
 
-    pub async fn send_event(&mut self, ev: &Vec<u8>) -> Result<(), ()> {
-        match self.stream.write_all(ev).await {
-            Err(e) => Err(()),
-            Ok(_) => Ok(()),
-        }
+    pub async fn send_event(&mut self, ev: KademliaEvent) -> Result<(), io::Error> {
+        self.stream.write_ev(ev).await
     }
 }
 
@@ -202,50 +178,41 @@ async fn pending_outgoing(
 ) {
     let mut stream = match dial.await {
         Err(e) => {
-            eprintln!("Error occured while connection to {remote_addr} in dial");
+            eprintln!("Error occured while connection to {remote_addr} in dial: {e}");
             return;
         }
         Ok(s) => s,
     };
 
     let ev = KademliaEvent::Ping { target: local_key };
-    let ev = bincode::serialize(&ev).unwrap();
-    stream.write_all(&ev).await.unwrap();
+    stream.write_ev(ev).await.unwrap();
 
-    let mut buf = vec![0; 1024];
-
-    loop {
-        let bytes_read = stream.read(&mut buf).await.unwrap();
-        if bytes_read == 0 {
-            continue;
-        }
-
-        match bincode::deserialize::<KademliaEvent>(&buf[0..bytes_read]) {
-            Err(e) => {
-                println!("Failed to deserialize: {e}");
+    match stream.read_ev().await {
+        Poll::Ready(Ok(ev)) => {
+            if let KademliaEvent::Ping { target } = ev {
                 event_sender
-                    .send(PendingConnectionEvent::ConnectionFailed(io::Error::new(
-                        io::ErrorKind::Other,
-                        "Failed to deserialize event".to_string(),
-                    )))
+                    .send(PendingConnectionEvent::ConnectionEstablished {
+                        key: target,
+                        remote_addr,
+                        stream,
+                    })
                     .await
                     .unwrap();
             }
-            Ok(ev) => {
-                if let KademliaEvent::Ping { target } = ev {
-                    event_sender
-                        .send(PendingConnectionEvent::ConnectionEstablished {
-                            key: target,
-                            remote_addr,
-                            stream,
-                        })
-                        .await
-                        .unwrap();
-                }
-            }
         }
-
-        break;
+        Poll::Ready(Err(error)) => {
+            event_sender
+                .send(PendingConnectionEvent::ConnectionFailed {
+                    error: io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("Failed to establish connetion: {error}"),
+                    ),
+                    remote_addr,
+                })
+                .await
+                .unwrap();
+        }
+        _ => {}
     }
 }
 
@@ -255,44 +222,37 @@ async fn pending_incoming(
     mut event_sender: mpsc::Sender<PendingConnectionEvent>,
     local_key: Key,
 ) {
-    let mut buf = vec![0; 1024];
+    match stream.read_ev().await {
+        Poll::Ready(Ok(ev)) => {
+            if let KademliaEvent::Ping { target } = ev {
+                let ev = KademliaEvent::Ping { target: local_key };
+                stream.write_ev(ev).await.unwrap();
 
-    loop {
-        let bytes_read = stream.read(&mut buf).await.unwrap();
-        if bytes_read == 0 {
-            continue;
-        }
-
-        match bincode::deserialize::<KademliaEvent>(&buf[0..bytes_read]) {
-            Err(e) => {
-                println!("Failed to deserialize: {e}");
                 event_sender
-                    .send(PendingConnectionEvent::ConnectionFailed(io::Error::new(
-                        io::ErrorKind::Other,
-                        "Failed to deserialize event".to_string(),
-                    )))
+                    .send(PendingConnectionEvent::ConnectionEstablished {
+                        key: target,
+                        remote_addr,
+                        stream,
+                    })
                     .await
                     .unwrap();
-            }
-            Ok(ev) => {
-                if let KademliaEvent::Ping { target } = ev {
-                    let ev = KademliaEvent::Ping { target: local_key };
-                    let ev = bincode::serialize(&ev).unwrap();
-                    stream.write_all(&ev).await.unwrap();
-
-                    event_sender
-                        .send(PendingConnectionEvent::ConnectionEstablished {
-                            key: target,
-                            remote_addr,
-                            stream,
-                        })
-                        .await
-                        .unwrap();
-                }
+            } else {
+                eprintln!("Received wrong event in pending_incoming");
             }
         }
-
-        break;
+        Poll::Ready(Err(error)) => {
+            event_sender
+                .send(PendingConnectionEvent::ConnectionFailed {
+                    error: io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("Failed to establish connection: {error}"),
+                    ),
+                    remote_addr,
+                })
+                .await
+                .unwrap();
+        }
+        _ => {}
     }
 }
 
@@ -307,16 +267,15 @@ async fn established_connection(
             command = command_receiver.next() => {
                 match command {
                     None => return,
-                    Some(command) => {
-                        let ev = bincode::serialize(&command).unwrap();
-                        connection.send_event(&ev).await.unwrap()
-                    }
+                    Some(command) => connection.send_event(command).await.unwrap()
                 }
             }
             event = connection.poll_read_stream() => {
                 match event {
                     Poll::Ready(Ok(event)) => {
-                        event_sender.send(EstablishedConnectionEvent::Event { event, key: key.clone() }).await.unwrap();
+                        event_sender.send(
+                            EstablishedConnectionEvent::Event { event, key: key.clone() }
+                        ).await.unwrap();
                     }
                     Poll::Ready(Err(error)) => {
                         command_receiver.close();
@@ -342,20 +301,35 @@ pub enum PendingConnectionEvent {
         remote_addr: SocketAddr,
         stream: TcpStream,
     },
-    ConnectionFailed(io::Error),
-    Error(io::Error),
+    ConnectionFailed {
+        remote_addr: SocketAddr,
+        error: io::Error,
+    },
 }
 
 #[derive(Debug)]
 pub enum EstablishedConnectionEvent {
     Event { key: Key, event: KademliaEvent },
     Closed { key: Key, error: String },
-    Error(io::Error),
 }
 
 #[derive(Debug)]
 pub enum PoolEvent {
-    NewConnection { key: Key, remote_addr: SocketAddr },
-    Request { key: Key, event: KademliaEvent },
-    ConnectionClosed { key: Key, error: String },
+    NewConnection {
+        key: Key,
+        remote_addr: SocketAddr,
+    },
+    Request {
+        key: Key,
+        event: KademliaEvent,
+    },
+    ConnectionClosed {
+        key: Key,
+        error: String,
+        remote_addr: SocketAddr,
+    },
+    ConnectionFailed {
+        error: io::Error,
+        remote_addr: SocketAddr,
+    },
 }

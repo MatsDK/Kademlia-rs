@@ -299,7 +299,7 @@ impl KademliaNode {
                 self.connected_peers.insert(key.clone());
                 self.update_node_status(key, Some(endpoint), NodeStatus::Connected);
 
-                // Once the connection is established send all the queued events to that peer.
+                // Once the connection is established send all the queued events for that peer.
                 for event in self
                     .queries
                     .iter_mut()
@@ -318,16 +318,26 @@ impl KademliaNode {
             PoolEvent::Request { key, event } => {
                 self.handle_incoming_event(key, event);
             }
-            PoolEvent::ConnectionClosed { key, error } => {
+            PoolEvent::ConnectionClosed {
+                key,
+                error,
+                remote_addr,
+            } => {
                 // Set the state for the closed peer to `PeerState::Failed`
                 for query in self.queries.iter_mut() {
                     query.on_failure(&key);
                 }
-                self.connected_peers.remove(&key);
 
+                self.connected_peers.remove(&key);
                 self.update_node_status(key, None, NodeStatus::Disconnected);
 
-                eprintln!("Connection closed with message: {}", error);
+                eprintln!(
+                    "Connection with {remote_addr} closed with message: {}",
+                    error
+                );
+            }
+            PoolEvent::ConnectionFailed { error, remote_addr } => {
+                eprintln!("Connection with {remote_addr} failed: {error}");
             }
         }
         None
@@ -494,6 +504,8 @@ impl KademliaNode {
                                 continue;
                             }
                             Some(ev) => {
+                                // The connection thread is not ready to receive an event, we
+                                // should try next iteration again.
                                 self.pending_event = Some((key, ev));
                             }
                         },
