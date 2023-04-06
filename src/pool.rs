@@ -143,7 +143,7 @@ impl Connection {
         self.stream.read_ev().await
     }
 
-    pub async fn send_event(&mut self, ev: KademliaEvent) -> Result<(), io::Error> {
+    pub async fn send_event(&mut self, ev: KademliaEvent) -> io::Result<()> {
         self.stream.write_ev(ev).await
     }
 }
@@ -177,9 +177,17 @@ async fn pending_outgoing(
     local_key: Key,
 ) {
     let mut stream = match dial.await {
-        Err(e) => {
-            eprintln!("Error occured while connection to {remote_addr} in dial: {e}");
-            return;
+        Err(error) => {
+            return event_sender
+                .send(PendingConnectionEvent::ConnectionFailed {
+                    error: io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("Failed to establish connetion: {error}"),
+                    ),
+                    remote_addr,
+                })
+                .await
+                .unwrap();
         }
         Ok(s) => s,
     };
@@ -288,7 +296,6 @@ async fn established_connection(
                     }
                     _ => {}
                 }
-
             }
         }
     }

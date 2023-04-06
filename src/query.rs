@@ -11,7 +11,7 @@ use crate::{
     node::KademliaEvent,
     routing::Node,
     store::Record,
-    K_VALUE,
+    ALPHA_VALUE, K_VALUE,
 };
 
 #[derive(Debug)]
@@ -95,7 +95,7 @@ impl QueryPool {
                     finished = Some(query_id);
                     break;
                 }
-                QueryState::Waiting(None) => {
+                QueryState::Waiting(None) | QueryState::WaitingAtCapacity => {
                     let time_elapsed = now - query.start;
                     if time_elapsed >= self.query_timeout {
                         timeout = Some(query_id);
@@ -131,6 +131,7 @@ impl QueryPool {
 pub enum QueryState {
     Finished,
     Waiting(Option<Key>),
+    WaitingAtCapacity,
 }
 
 #[derive(Debug)]
@@ -420,7 +421,9 @@ impl PeersIter {
         for peer in self.closest_peers.values_mut() {
             match peer.state {
                 PeerState::NotContacted => {
-                    // TODO: check if 'self.num_waiting' is below some maximum
+                    if self.num_waiting >= ALPHA_VALUE {
+                        return QueryState::WaitingAtCapacity;
+                    }
 
                     self.num_waiting += 1;
                     let timeout = now + self.peer_timeout;
@@ -431,6 +434,8 @@ impl PeersIter {
                     if now >= timeout {
                         self.num_waiting -= 1;
                         peer.state = PeerState::Unresponsive
+                    } else if self.num_waiting >= ALPHA_VALUE {
+                        return QueryState::WaitingAtCapacity;
                     }
                 }
                 PeerState::Succeeded => {

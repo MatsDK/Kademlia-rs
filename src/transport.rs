@@ -17,7 +17,7 @@ pub struct Transport {
     local_addr: SocketAddr,
 }
 
-pub type Dial = Pin<Box<dyn Future<Output = Result<TcpStream, io::Error>> + Send>>;
+pub type Dial = Pin<Box<dyn Future<Output = io::Result<TcpStream>> + Send>>;
 
 #[derive(Debug)]
 pub enum TransportError {
@@ -161,7 +161,7 @@ impl TcpStream {
         }
     }
 
-    pub async fn write_ev(&mut self, ev: KademliaEvent) -> Result<(), std::io::Error> {
+    pub async fn write_ev(&mut self, ev: KademliaEvent) -> io::Result<()> {
         let ev = bincode::serialize(&ev).unwrap();
         self.write_all(&ev).await
     }
@@ -172,7 +172,7 @@ impl AsyncRead for TcpStream {
         mut self: Pin<&mut Self>,
         cx: &mut Context,
         buf: &mut [u8],
-    ) -> Poll<Result<usize, io::Error>> {
+    ) -> Poll<io::Result<usize>> {
         let mut read_buf = tokio::io::ReadBuf::new(buf);
         futures::ready!(tokio::io::AsyncRead::poll_read(
             Pin::new(&mut self.0),
@@ -188,15 +188,15 @@ impl AsyncWrite for TcpStream {
         mut self: Pin<&mut Self>,
         cx: &mut Context,
         buf: &[u8],
-    ) -> Poll<Result<usize, io::Error>> {
+    ) -> Poll<io::Result<usize>> {
         tokio::io::AsyncWrite::poll_write(Pin::new(&mut self.0), cx, buf)
     }
 
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), io::Error>> {
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<()>> {
         tokio::io::AsyncWrite::poll_flush(Pin::new(&mut self.0), cx)
     }
 
-    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), io::Error>> {
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<()>> {
         tokio::io::AsyncWrite::poll_shutdown(Pin::new(&mut self.0), cx)
     }
 

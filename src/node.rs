@@ -388,7 +388,6 @@ impl KademliaNode {
                     },
                 };
 
-                // TODO: make sure this is a fixed set of peers iterator for `query_result.nodes`
                 self.queries.add_query_with_id(
                     query_result.query_id,
                     target,
@@ -434,13 +433,10 @@ impl KademliaNode {
                     };
                     Some(NodeEvent::GenerateEvent(out_ev))
                 }
-                // let out_ev = OutEvent::OutBoundQueryProgressed {
-                //     result: QueryResult::GetRecord { key },
-                // };
-                // Some(NodeEvent::GenerateEvent(out_ev))
             }
             QueryInfo::Bootstrap { .. } => {
-                // TODO: should refresh some buckets
+                // TODO: should refresh the furthest away buckets
+                // https://github.com/libp2p/rust-libp2p/blob/master/protocols/kad/src/behaviour.rs#L1232-L1301
                 let out_ev = OutEvent::OutBoundQueryProgressed {
                     result: QueryResult::Bootstrap,
                 };
@@ -505,7 +501,7 @@ impl KademliaNode {
                             }
                             Some(ev) => {
                                 // The connection thread is not ready to receive an event, we
-                                // should try next iteration again.
+                                // should try next iteration to send the event again.
                                 self.pending_event = Some((key, ev));
                             }
                         },

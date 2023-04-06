@@ -20,10 +20,11 @@ use crate::node::{
 use crate::query::Quorum;
 use crate::store::Record;
 
-pub const K_VALUE: usize = 2;
+pub const K_VALUE: usize = 20;
+pub const ALPHA_VALUE: usize = 3;
 static BOOTSTRAP_NODE_KEY: &str = "5zrr7BPc5gnMV6EbdpPfxpoJfZuddRH8PK1EQQmEAPFw";
 
-#[derive(Parser, Debug)]
+#[derive(Parser)]
 struct Args {
     /// Local listening addr
     #[arg(short, long)]
