@@ -28,6 +28,8 @@ pub struct KademliaNode {
     queued_events: VecDeque<NodeEvent>,
     pending_event: Option<(Key, KademliaEvent)>,
     store: RecordStore,
+
+    addr: Multiaddr,
 }
 
 impl KademliaNode {
@@ -45,7 +47,12 @@ impl KademliaNode {
             queued_events: VecDeque::new(),
             pending_event: None,
             store: RecordStore::new(key),
+            addr,
         })
+    }
+
+    pub fn get_addr(&self) -> &Multiaddr {
+        &self.addr
     }
 
     pub fn dial(&mut self, addr: impl Into<Multiaddr>) -> Result<(), ()> {

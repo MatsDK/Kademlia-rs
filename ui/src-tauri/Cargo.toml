@@ -1,11 +1,11 @@
 [package]
 name = "ui"
 version = "0.0.0"
-description = "A Tauri App"
 authors = ["you"]
+edition = "2021"
 license = ""
 repository = ""
-edition = "2021"
+description = "A Tauri App"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -13,9 +13,17 @@ edition = "2021"
 tauri-build = { version = "1.4", features = [] }
 
 [dependencies]
-tauri = { version = "1.4", features = ["shell-open"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+tauri = { version = "1.4", features = ["shell-open"] }
+
+taurpc = "0.2.3"
+
+specta = { version = "1.0.5", features = ["export"] }
+tokio = { version = "1", features = ["full"] }
+
+futures = "0.3.25"
+kademlia-rs = { path = "../../" }
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem

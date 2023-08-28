@@ -3,6 +3,9 @@ name = "kademlia-rs"
 version = "0.1.0"
 edition = "2021"
 
+[[example]]
+name = "main"
+
 [dependencies]
 sha2 = "0.10.6"
 uint = "0.9.5"
