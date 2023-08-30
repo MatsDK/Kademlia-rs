@@ -7,7 +7,7 @@ use kademlia_rs::{
     multiaddr::{multiaddr, Multiaddr},
     node::{GetRecordResult, KademliaNode, OutEvent, PutRecordError, PutRecordOk, QueryResult},
 };
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, ops::Index, str::FromStr, sync::Arc};
 use tauri::{utils::config::CliArg, AppHandle};
 use tokio::{
     net::TcpListener,
@@ -26,6 +26,10 @@ struct NodeInfo {
 trait Api {
     async fn new_node(app_handle: AppHandle) -> Result<NodeInfo, ()>;
 
+    async fn add_bootstrap_node(app_handle: AppHandle, key: String);
+
+    async fn remove_bootstrap_node(app_handle: AppHandle, key: String);
+
     #[taurpc(event)]
     async fn bootstrap_nodes_changed(bootstrap_nodes: Vec<(String, String)>);
 }
@@ -40,6 +44,20 @@ impl Api for ApiImpl {
     async fn new_node(self, app_handle: AppHandle) -> Result<NodeInfo, ()> {
         let mut state = self.manager.lock().await;
         state.init_node(app_handle).await
+    }
+
+    async fn add_bootstrap_node(self, app_handle: AppHandle, key: String) {
+        let mut state = self.manager.lock().await;
+        // TODO: return invalid key error
+        let key = Key::from_str(&key).unwrap();
+        state.add_bootstrap_node(key, app_handle)
+    }
+
+    async fn remove_bootstrap_node(self, app_handle: AppHandle, key: String) {
+        let mut state = self.manager.lock().await;
+        // TODO: return invalid key error
+        let key = Key::from_str(&key).unwrap();
+        state.remove_bootstrap_node(key, app_handle)
     }
 }
 
@@ -89,19 +107,38 @@ impl Manager {
     }
 
     fn add_bootstrap_node(&mut self, key: Key, app_handle: AppHandle) {
+        if self
+            .bootstrap_nodes
+            .iter()
+            .find(|(k, _)| *k == key)
+            .is_some()
+        {
+            println!("already a bootstrap node");
+            // Already bootstrap node
+            return;
+        }
+
         if let Some((addr, _)) = self.nodes.get(&key) {
             self.bootstrap_nodes.push((key, addr.clone()));
-
-            let event_trigger = ApiEventTrigger::new(app_handle);
-            event_trigger
-                .bootstrap_nodes_changed(
-                    self.bootstrap_nodes
-                        .iter()
-                        .map(|(key, addr)| (key.to_string(), addr.to_string()))
-                        .collect::<Vec<_>>(),
-                )
-                .unwrap();
+            self.trigger_bootstrap_node_update(app_handle);
         }
+    }
+
+    fn remove_bootstrap_node(&mut self, key: Key, app_handle: AppHandle) {
+        self.bootstrap_nodes.retain(|(k, _)| *k != key);
+        self.trigger_bootstrap_node_update(app_handle);
+    }
+
+    fn trigger_bootstrap_node_update(&self, app_handle: AppHandle) {
+        let event_trigger = ApiEventTrigger::new(app_handle);
+        event_trigger
+            .bootstrap_nodes_changed(
+                self.bootstrap_nodes
+                    .iter()
+                    .map(|(key, addr)| (key.to_string(), addr.to_string()))
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap();
     }
 }
 
