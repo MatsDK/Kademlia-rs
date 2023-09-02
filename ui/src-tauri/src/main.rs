@@ -6,20 +6,34 @@ use kademlia_rs::{
     key::Key,
     multiaddr::{multiaddr, Multiaddr},
     node::{GetRecordResult, KademliaNode, OutEvent, PutRecordError, PutRecordOk, QueryResult},
+    query::Quorum,
+    routing::Node,
+    store::Record,
 };
-use std::{collections::HashMap, ops::Index, str::FromStr, sync::Arc};
-use tauri::{utils::config::CliArg, AppHandle};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
+use tauri::AppHandle;
 use tokio::{
     net::TcpListener,
-    sync::broadcast::{channel, Sender},
+    sync::broadcast::{channel, Receiver, Sender},
     sync::Mutex,
 };
 
+type Buckets = HashMap<u8, Vec<(String, String, String)>>;
+
 #[taurpc::ipc_type]
+#[derive(Default)]
 struct NodeInfo {
     key: String,
     addr: String,
     is_bootstrap: bool,
+    buckets: Buckets,
+}
+
+#[taurpc::ipc_type]
+struct RoutingTableChanged {
+    node_key: String,
+    // Hashmap containing (Key, Addr, Status) for each node, for a specific bucket-idx
+    buckets: Buckets,
 }
 
 #[taurpc::procedures(export_to = "../src/lib/bindings.ts", event_trigger = ApiEventTrigger)]
@@ -30,8 +44,20 @@ trait Api {
 
     async fn remove_bootstrap_node(app_handle: AppHandle, key: String);
 
+    // async fn disconnect(key: String);
+
+    async fn put_record(
+        app_handle: AppHandle,
+        node_key: String,
+        record_key: Option<String>,
+        value: String,
+    );
+
     #[taurpc(event)]
     async fn bootstrap_nodes_changed(bootstrap_nodes: Vec<(String, String)>);
+
+    #[taurpc(event)]
+    async fn routing_table_changed(routing_table: RoutingTableChanged);
 }
 
 #[derive(Clone)]
@@ -42,30 +68,47 @@ struct ApiImpl {
 #[taurpc::resolvers]
 impl Api for ApiImpl {
     async fn new_node(self, app_handle: AppHandle) -> Result<NodeInfo, ()> {
-        let mut state = self.manager.lock().await;
-        state.init_node(app_handle).await
+        let mut manager = self.manager.lock().await;
+        manager.init_node(app_handle).await
     }
 
     async fn add_bootstrap_node(self, app_handle: AppHandle, key: String) {
-        let mut state = self.manager.lock().await;
+        let mut manager = self.manager.lock().await;
         // TODO: return invalid key error
         let key = Key::from_str(&key).unwrap();
-        state.add_bootstrap_node(key, app_handle)
+        manager.add_bootstrap_node(key, app_handle);
     }
 
     async fn remove_bootstrap_node(self, app_handle: AppHandle, key: String) {
-        let mut state = self.manager.lock().await;
+        let mut manager = self.manager.lock().await;
         // TODO: return invalid key error
         let key = Key::from_str(&key).unwrap();
-        state.remove_bootstrap_node(key, app_handle)
+        manager.remove_bootstrap_node(key, app_handle);
+    }
+
+    async fn put_record(
+        self,
+        app_handle: AppHandle,
+        node_key: String,
+        record_key: Option<String>,
+        value: String,
+    ) {
+        let mut manager = self.manager.lock().await;
+        let key = Key::from_str(&node_key).unwrap();
+        manager.put_record(key, record_key, value);
     }
 }
 
 type State = Arc<Mutex<Manager>>;
 
+#[derive(Debug, Clone)]
+enum KadEvent {
+    PutRecord { record: Record },
+}
+
 #[derive(Default)]
 struct Manager {
-    nodes: HashMap<Key, (Multiaddr, Sender<()>)>,
+    nodes: HashMap<Key, (Multiaddr, Sender<KadEvent>)>,
     bootstrap_nodes: Vec<(Key, Multiaddr)>,
 }
 
@@ -90,19 +133,20 @@ impl Manager {
         self.nodes.insert(key, (node.get_addr().clone(), tx));
 
         if is_bootstrap {
-            self.add_bootstrap_node(key, app_handle);
+            self.add_bootstrap_node(key, app_handle.clone());
         } else {
             for (key, addr) in self.bootstrap_nodes.iter() {
                 node.add_address(key, addr.clone());
             }
         }
 
-        execute_node(node, is_bootstrap);
+        execute_node(node, is_bootstrap, rx, app_handle);
 
         Ok(NodeInfo {
             key: key.to_string(),
             addr: addr.to_string(),
             is_bootstrap,
+            ..Default::default()
         })
     }
 
@@ -140,10 +184,64 @@ impl Manager {
             )
             .unwrap();
     }
+
+    fn put_record(&mut self, node_key: Key, record_key: Option<String>, value: String) {
+        let node_sender = match self.nodes.get(&node_key) {
+            Some((_, sender)) => sender,
+            None => return,
+        };
+
+        let key = match record_key {
+            // TODO: return error if invalid key
+            Some(key) => Key::from_str(&key).unwrap(),
+            None => Key::random(),
+        };
+        let record = Record {
+            key,
+            value: value.as_bytes().to_vec(),
+            publisher: Some(node_key),
+        };
+
+        let event = KadEvent::PutRecord { record };
+        node_sender.send(event).unwrap();
+    }
 }
 
-fn execute_node(mut node: KademliaNode, is_bootstrap: bool) {
+fn trigger_routing_table_update(node: &KademliaNode, app_handle: AppHandle) {
+    let routing_table = node.get_routing_table();
+
+    let buckets = routing_table
+        .iter()
+        .map(|(idx, nodes)| {
+            let nodes = nodes
+                .iter()
+                .map(|Node { key, addr, status }| {
+                    (key.to_string(), addr.to_string(), status.to_string())
+                })
+                .collect::<Vec<_>>();
+
+            return (idx.clone(), nodes);
+        })
+        .collect();
+
+    let event = RoutingTableChanged {
+        node_key: node.local_key().to_string(),
+        buckets,
+    };
+
+    let event_trigger = ApiEventTrigger::new(app_handle);
+    event_trigger.routing_table_changed(event).unwrap();
+}
+
+fn execute_node(
+    mut node: KademliaNode,
+    is_bootstrap: bool,
+    mut cmd_receiver: Receiver<KadEvent>,
+    app_handle: AppHandle,
+) {
     tokio::spawn(async move {
+        let app_handle = app_handle.clone();
+
         if !is_bootstrap {
             // TODO: better error handling, return error event to client
             node.bootstrap().unwrap();
@@ -151,11 +249,21 @@ fn execute_node(mut node: KademliaNode, is_bootstrap: bool) {
 
         loop {
             tokio::select! {
+                cmd = cmd_receiver.recv() => {
+                    if  let Err(e) = cmd {
+                        println!("Error: {:?}", e);
+                        continue
+                    }
+                    match cmd.unwrap() {
+                        KadEvent::PutRecord { record} => {
+                            node.put_record(record, Quorum::One).unwrap();
+                        }
+                    };
+                }
                 ev = node.select_next_some() => {
                     match ev {
-                        OutEvent::ConnectionEstablished( peer_id) => {
-                            println!("> Connection established: {}", peer_id);
-                        }
+                        OutEvent::ConnectionEstablished(_peer_id) => trigger_routing_table_update(&node, app_handle.clone()),
+                        OutEvent::ConnectionClosed(_peer_id) => trigger_routing_table_update(&node, app_handle.clone()),
                         OutEvent::OutBoundQueryProgressed { result } => {
                             match result {
                                 QueryResult::FindNode { nodes, target } => {

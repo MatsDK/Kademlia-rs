@@ -4,6 +4,7 @@
     import { taurpc } from "./lib/ipc";
     import { nodes } from "./lib/store";
     import BootstrapNodes from "./components/BootstrapNodes.svelte";
+    import { onMount } from "svelte";
 
     const newNode = async () => {
         try {
@@ -13,6 +14,17 @@
             console.error("Error creating node", e);
         }
     };
+
+    onMount(() => {
+        const unlisten = taurpc.routing_table_changed.on((changed) => {
+            let node = $nodes.find(({ key }) => key === changed.node_key);
+            if (node) {
+                node.buckets = changed.buckets;
+                nodes.set($nodes);
+            }
+        });
+        return unlisten;
+    });
 </script>
 
 <div

@@ -1,8 +1,12 @@
-use std::time::{Duration, Instant};
-
 use arrayvec::ArrayVec;
 use multiaddr::Multiaddr;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "debug")]
+use std::collections::HashMap;
+use std::{
+    fmt,
+    time::{Duration, Instant},
+};
 
 use crate::{
     key::{Distance, Key},
@@ -138,6 +142,19 @@ impl RoutingTable {
 
         None
     }
+
+    #[cfg(feature = "debug")]
+    pub fn get_abstract_view(&self) -> HashMap<u8, Vec<Node>> {
+        let mut routing_table = HashMap::new();
+        self.kbuckets.iter().enumerate().for_each(|(idx, bucket)| {
+            if bucket.nodes.len() == 0 {
+                return;
+            }
+
+            routing_table.insert(idx as u8, bucket.get_nodes());
+        });
+        routing_table
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -158,6 +175,15 @@ impl BucketIndex {
 pub enum NodeStatus {
     Connected,
     Disconnected,
+}
+
+impl fmt::Display for NodeStatus {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            NodeStatus::Connected => write!(f, "Connected"),
+            NodeStatus::Disconnected => write!(f, "Disconnected"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -220,6 +246,7 @@ impl KBucket {
         }
     }
 
+    #[allow(unused)]
     fn get_keys(&self) -> Vec<Key> {
         self.nodes
             .iter()
@@ -322,6 +349,7 @@ impl KBucket {
         }
     }
 
+    #[allow(unused)]
     pub fn status(&self, pos: usize) -> NodeStatus {
         if self.first_connected_idx.map_or(false, |i| pos >= i) {
             NodeStatus::Connected
@@ -334,8 +362,8 @@ impl KBucket {
         match node.status {
             NodeStatus::Connected => {
                 if self.nodes.is_full() {
-                    // All nodes in this bucket are considered connected.
                     if self.first_connected_idx == Some(0) {
+                        // All nodes in this bucket are considered connected.
                         return InsertResult::Full;
                     } else {
                         self.pending = Some(PendingNode {

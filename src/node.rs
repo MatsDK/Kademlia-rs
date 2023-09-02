@@ -2,7 +2,7 @@ use futures::{stream::FusedStream, Stream};
 use multiaddr::Multiaddr;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     io,
     num::NonZeroUsize,
     pin::Pin,
@@ -28,14 +28,13 @@ pub struct KademliaNode {
     queued_events: VecDeque<NodeEvent>,
     pending_event: Option<(Key, KademliaEvent)>,
     store: RecordStore,
-
     addr: Multiaddr,
 }
 
 impl KademliaNode {
     pub async fn new(key: Key, addr: impl Into<Multiaddr>) -> io::Result<Self> {
         let addr = addr.into();
-        println!(">> Listening {addr} >> {key}");
+        // println!(">> Listening {addr} >> {key}");
         let transport = Transport::new(&addr).await.unwrap();
 
         Ok(Self {
@@ -186,7 +185,7 @@ impl KademliaNode {
     }
 
     fn record_received(&mut self, peer_id: Key, record: Record, request_id: usize) {
-        println!("stored record successfully: {record}");
+        // println!("stored record successfully: {record}");
         self.store.put(record).unwrap();
         self.queued_events.push_back(NodeEvent::Notify {
             peer_id,
@@ -342,6 +341,9 @@ impl KademliaNode {
                     "Connection with {remote_addr} closed with message: {}",
                     error
                 );
+                // TODO: handle disconnect reason
+                let out_ev = OutEvent::ConnectionClosed(key);
+                return Some(NodeEvent::GenerateEvent(out_ev));
             }
             PoolEvent::ConnectionFailed { error, remote_addr } => {
                 eprintln!("Connection with {remote_addr} failed: {error}");
@@ -558,6 +560,12 @@ impl KademliaNode {
             return Poll::Pending;
         }
     }
+
+    #[cfg(feature = "debug")]
+    // Return abstract view of routing table
+    pub fn get_routing_table(&self) -> HashMap<u8, Vec<Node>> {
+        self.routing_table.get_abstract_view()
+    }
 }
 
 impl Stream for KademliaNode {
@@ -616,6 +624,7 @@ pub enum NodeEvent {
 pub enum OutEvent {
     OutBoundQueryProgressed { result: QueryResult },
     ConnectionEstablished(Key),
+    ConnectionClosed(Key),
     Other,
 }
 

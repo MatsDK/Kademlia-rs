@@ -23,7 +23,7 @@ specta = { version = "1.0.5", features = ["export"] }
 tokio = { version = "1", features = ["full"] }
 
 futures = "0.3.25"
-kademlia-rs = { path = "../../" }
+kademlia-rs = { path = "../../", features = ["debug"] }
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem

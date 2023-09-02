@@ -48,7 +48,7 @@
                 on:click={() => (adding_node = true)}>Add bootstrap node</button
             >
         </div>
-        <ul class="">
+        <ul class="mt-2">
             {#each $bootstrap_nodes as [key, addr]}
                 <li class="flex justify-between group">
                     <div class="flex gap-4 w-2/3 justify-between">

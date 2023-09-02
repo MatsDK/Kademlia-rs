@@ -6,6 +6,9 @@ edition = "2021"
 [[example]]
 name = "main"
 
+[features]
+debug = []
+
 [dependencies]
 sha2 = "0.10.6"
 uint = "0.9.5"

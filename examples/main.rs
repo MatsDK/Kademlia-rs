@@ -116,10 +116,13 @@ async fn main() -> io::Result<()> {
             }
             ev = node.select_next_some() => {
                 match ev {
-                    OutEvent::ConnectionEstablished( peer_id) => {
+                    OutEvent::ConnectionEstablished(peer_id) => {
                         println!("> Connection established: {}", peer_id);
                     }
-                    OutEvent::OutBoundQueryProgressed {result} => {
+                    OutEvent::ConnectionClosed(peer_id) => {
+                        println!("> Connection closed: {}", peer_id);
+                    }
+                    OutEvent::OutBoundQueryProgressed { result } => {
                         match result {
                             QueryResult::FindNode { nodes, target } => {
                                 println!("> Found nodes closest to {target}");
@@ -128,11 +131,11 @@ async fn main() -> io::Result<()> {
                                 }
                             }
                             QueryResult::PutRecord(result) => match result {
-                                Ok(PutRecordOk{ key }) => {
+                                Ok(PutRecordOk { key }) => {
                                     println!("> Put record {key} finished");
                                 }
                                 Err(err) => match err {
-                                    PutRecordError::QuorumFailed {key, successfull_peers, quorum } => {
+                                    PutRecordError::QuorumFailed { key, successfull_peers, quorum } => {
                                         println!("> Put record {key} quorm failed: {quorum} success: {successfull_peers:?}");
                                     }
                                 }
