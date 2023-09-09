@@ -1,6 +1,7 @@
 use futures::{stream::FusedStream, Stream};
 use multiaddr::Multiaddr;
 use serde::{Deserialize, Serialize};
+#[allow(unused)]
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     io,
@@ -89,6 +90,17 @@ impl KademliaNode {
 
         // Otherwise, check if the address is already in the routing table.
         self.routing_table.get_addr(peer)
+    }
+
+    pub fn disconnect(&mut self, peer_id: Key) -> Result<(), ()> {
+        let was_connected = self.connected_peers.contains(&peer_id);
+        self.pool.disconnect(peer_id);
+
+        if was_connected {
+            Ok(())
+        } else {
+            Err(())
+        }
     }
 
     pub fn bootstrap(&mut self) -> io::Result<()> {
@@ -337,10 +349,9 @@ impl KademliaNode {
                 self.connected_peers.remove(&key);
                 self.update_node_status(key, None, NodeStatus::Disconnected);
 
-                eprintln!(
-                    "Connection with {remote_addr} closed with message: {}",
-                    error
-                );
+                if let Some(e) = error {
+                    eprintln!("Connection with {remote_addr} closed with message: {}", e);
+                }
                 // TODO: handle disconnect reason
                 let out_ev = OutEvent::ConnectionClosed(key);
                 return Some(NodeEvent::GenerateEvent(out_ev));

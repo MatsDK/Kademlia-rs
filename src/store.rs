@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::key::Key;
 
 #[derive(Debug)]
+#[allow(unused)]
 pub struct RecordStore {
     local_key: Key,
     records: HashMap<Key, Record>,

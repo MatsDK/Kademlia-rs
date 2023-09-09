@@ -292,6 +292,7 @@ impl Query {
 }
 
 #[derive(Debug)]
+#[allow(unused)]
 enum PeersIterState {
     Finished,
     Iterating,
