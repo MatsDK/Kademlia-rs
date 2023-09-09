@@ -10,6 +10,7 @@ use tokio::io::{stdin, AsyncBufReadExt, BufReader};
 use kademlia_rs::key::Key;
 use kademlia_rs::node::{
     GetRecordResult, KademliaNode, OutEvent, PutRecordError, PutRecordOk, QueryResult,
+    StoreChangedEvent,
 };
 use kademlia_rs::query::Quorum;
 use kademlia_rs::store::Record;
@@ -121,6 +122,15 @@ async fn main() -> io::Result<()> {
                     }
                     OutEvent::ConnectionClosed(peer_id) => {
                         println!("> Connection closed: {}", peer_id);
+                    }
+                    OutEvent::StoreChanged(change) => match change {
+                        StoreChangedEvent::PutRecord { record } => {
+                            println!("> Successfully stored record locally: {record:?}");
+
+                        }
+                        StoreChangedEvent::RemoveRecord { record_key } => {
+                            println!("> Successfully remove record locally: {record_key}");
+                        }
                     }
                     OutEvent::OutBoundQueryProgressed { result } => {
                         match result {

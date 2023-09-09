@@ -16,13 +16,26 @@
     };
 
     onMount(() => {
-        const unlisten = taurpc.routing_table_changed.on((changed) => {
-            let node = $nodes.find(({ key }) => key === changed.node_key);
-            if (node) {
-                node.buckets = changed.buckets;
-                nodes.set($nodes);
-            }
-        });
+        const unlisten: Array<() => void> = [];
+        unlisten.push(
+            taurpc.routing_table_changed.on((changed) => {
+                let node = $nodes.find(({ key }) => key === changed.node_key);
+                if (node) {
+                    node.buckets = changed.buckets;
+                    nodes.set($nodes);
+                }
+            })
+        );
+        unlisten.push(
+            taurpc.record_store_changed.on((changed) => {
+                let node = $nodes.find(({ key }) => key === changed.node_key);
+                if (node) {
+                    node.records = changed.records;
+                    nodes.set($nodes);
+                }
+            })
+        );
+
         return unlisten;
     });
 </script>

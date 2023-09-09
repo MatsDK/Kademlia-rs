@@ -61,8 +61,18 @@
             {/each}
         </div>
         {#if tab === "Records"}
-            {#each node.records ?? [] as record}
-                <div>test</div>
+            {#each node.records ?? [] as [key, publisher, value]}
+                {@const is_publisher = publisher == node.key}
+                <div>
+                    <span>{key}</span>
+                    <span>{value}</span>
+                    {#if is_publisher}
+                        <span
+                            class="bg-gray-300 text-black text-xs px-1 rounded-md font-semibold"
+                            >Publisher</span
+                        >
+                    {/if}
+                </div>
             {/each}
         {:else if tab === "Get"}
             <div

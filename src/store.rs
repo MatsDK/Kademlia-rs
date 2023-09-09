@@ -45,6 +45,14 @@ impl RecordStore {
     pub fn remove(&mut self, key: &Key) {
         self.records.remove(key);
     }
+
+    // #[cfg(feature = "debug")]
+    pub fn get_all_records(&self) -> Vec<&Record> {
+        self.records
+            .iter()
+            .map(|(_, record)| record)
+            .collect::<Vec<_>>()
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

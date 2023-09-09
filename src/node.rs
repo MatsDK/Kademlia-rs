@@ -118,6 +118,13 @@ impl KademliaNode {
     pub fn put_record(&mut self, record: Record, quorum: Quorum) -> Result<(), String> {
         self.store.put(record.clone()).unwrap();
 
+        self.queued_events
+            .push_back(NodeEvent::GenerateEvent(OutEvent::StoreChanged(
+                StoreChangedEvent::PutRecord {
+                    record: record.clone(),
+                },
+            )));
+
         let peers = self.routing_table.closest_nodes(&record.key);
         let target = record.key.clone();
 
@@ -152,6 +159,13 @@ impl KademliaNode {
         if let Some(record) = self.store.get(key) {
             if record.publisher.as_ref() == Some(self.local_key()) {
                 self.store.remove(key);
+
+                self.queued_events
+                    .push_back(NodeEvent::GenerateEvent(OutEvent::StoreChanged(
+                        StoreChangedEvent::RemoveRecord {
+                            record_key: key.clone(),
+                        },
+                    )))
             }
         }
     }
@@ -197,8 +211,12 @@ impl KademliaNode {
     }
 
     fn record_received(&mut self, peer_id: Key, record: Record, request_id: usize) {
-        // println!("stored record successfully: {record}");
-        self.store.put(record).unwrap();
+        self.store.put(record.clone()).unwrap();
+        self.queued_events
+            .push_back(NodeEvent::GenerateEvent(OutEvent::StoreChanged(
+                StoreChangedEvent::PutRecord { record },
+            )));
+
         self.queued_events.push_back(NodeEvent::Notify {
             peer_id,
             event: KademliaEvent::PutRecordRes { request_id },
@@ -577,6 +595,12 @@ impl KademliaNode {
     pub fn get_routing_table(&self) -> HashMap<u8, Vec<Node>> {
         self.routing_table.get_abstract_view()
     }
+
+    #[cfg(feature = "debug")]
+    // Return locally stored records
+    pub fn get_record_store(&self) -> Vec<&Record> {
+        self.store.get_all_records()
+    }
 }
 
 impl Stream for KademliaNode {
@@ -636,7 +660,14 @@ pub enum OutEvent {
     OutBoundQueryProgressed { result: QueryResult },
     ConnectionEstablished(Key),
     ConnectionClosed(Key),
+    StoreChanged(StoreChangedEvent),
     Other,
+}
+
+#[derive(Debug, Clone)]
+pub enum StoreChangedEvent {
+    PutRecord { record: Record },
+    RemoveRecord { record_key: Key },
 }
 
 #[derive(Debug, Clone)]

@@ -19,6 +19,7 @@ use tokio::{
 };
 
 type Buckets = HashMap<u8, Vec<(String, String, String)>>;
+type Records = Vec<(String, String, String)>;
 
 #[taurpc::ipc_type]
 #[derive(Default)]
@@ -27,6 +28,7 @@ struct NodeInfo {
     addr: String,
     is_bootstrap: bool,
     buckets: Buckets,
+    records: Records,
 }
 
 #[taurpc::ipc_type]
@@ -34,6 +36,13 @@ struct RoutingTableChanged {
     node_key: String,
     // Hashmap containing (Key, Addr, Status) for each node, for a specific bucket-idx
     buckets: Buckets,
+}
+
+#[taurpc::ipc_type]
+struct RecordStoreChanged {
+    node_key: String,
+    // Vec containing records: (key, publisher, value)
+    records: Records,
 }
 
 #[taurpc::procedures(export_to = "../src/lib/bindings.ts", event_trigger = ApiEventTrigger)]
@@ -44,10 +53,12 @@ trait Api {
 
     async fn remove_bootstrap_node(app_handle: AppHandle, key: String);
 
-    // async fn disconnect(key: String);
+    // async fn disconnect_node(node_id: String, connect_peer_id: String);
+
+    // async fn close_node(node_id: String);
 
     async fn put_record(
-        app_handle: AppHandle,
+        // app_handle: AppHandle,
         node_key: String,
         record_key: Option<String>,
         value: String,
@@ -58,6 +69,9 @@ trait Api {
 
     #[taurpc(event)]
     async fn routing_table_changed(routing_table: RoutingTableChanged);
+
+    #[taurpc(event)]
+    async fn record_store_changed(records: RecordStoreChanged);
 }
 
 #[derive(Clone)]
@@ -88,7 +102,7 @@ impl Api for ApiImpl {
 
     async fn put_record(
         self,
-        app_handle: AppHandle,
+        // app_handle: AppHandle,
         node_key: String,
         record_key: Option<String>,
         value: String,
@@ -220,7 +234,7 @@ fn trigger_routing_table_update(node: &KademliaNode, app_handle: AppHandle) {
                 })
                 .collect::<Vec<_>>();
 
-            return (idx.clone(), nodes);
+            (idx.clone(), nodes)
         })
         .collect();
 
@@ -231,6 +245,35 @@ fn trigger_routing_table_update(node: &KademliaNode, app_handle: AppHandle) {
 
     let event_trigger = ApiEventTrigger::new(app_handle);
     event_trigger.routing_table_changed(event).unwrap();
+}
+
+fn trigger_store_change_update(node: &KademliaNode, app_handle: AppHandle) {
+    let records = node.get_record_store();
+    let records = records
+        .iter()
+        .map(
+            |Record {
+                 key,
+                 value,
+                 publisher,
+             }| {
+                let publisher = publisher.map(|v| v.to_string()).unwrap_or_default();
+                let value = match String::from_utf8(value.clone()) {
+                    Ok(v) => v,
+                    Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
+                };
+                (key.to_string(), publisher, value)
+            },
+        )
+        .collect();
+
+    let event = RecordStoreChanged {
+        node_key: node.local_key().to_string(),
+        records,
+    };
+
+    let event_trigger = ApiEventTrigger::new(app_handle);
+    event_trigger.record_store_changed(event).unwrap();
 }
 
 fn execute_node(
@@ -264,6 +307,7 @@ fn execute_node(
                     match ev {
                         OutEvent::ConnectionEstablished(_peer_id) => trigger_routing_table_update(&node, app_handle.clone()),
                         OutEvent::ConnectionClosed(_peer_id) => trigger_routing_table_update(&node, app_handle.clone()),
+                        OutEvent::StoreChanged(_change) => trigger_store_change_update(&node, app_handle.clone()),
                         OutEvent::OutBoundQueryProgressed { result } => {
                             match result {
                                 QueryResult::FindNode { nodes, target } => {
