@@ -55,14 +55,13 @@ trait Api {
 
     // async fn disconnect_node(node_id: String, connect_peer_id: String);
 
-    // async fn close_node(node_id: String);
+    async fn close_node(app_handle: AppHandle, node_id: String) -> Result<(), ()>;
 
-    async fn put_record(
-        // app_handle: AppHandle,
-        node_key: String,
-        record_key: Option<String>,
-        value: String,
-    );
+    async fn get_record(node_key: String, record_key: String);
+
+    async fn put_record(node_key: String, record_key: Option<String>, value: String);
+
+    async fn remove_record(node_key: String, record_key: String);
 
     #[taurpc(event)]
     async fn bootstrap_nodes_changed(bootstrap_nodes: Vec<(String, String)>);
@@ -100,6 +99,12 @@ impl Api for ApiImpl {
         manager.remove_bootstrap_node(key, app_handle);
     }
 
+    async fn get_record(self, node_key: String, record_key: String) {
+        let mut manager = self.manager.lock().await;
+        let key = Key::from_str(&node_key).unwrap();
+        manager.get_record(key, record_key);
+    }
+
     async fn put_record(
         self,
         // app_handle: AppHandle,
@@ -111,13 +116,28 @@ impl Api for ApiImpl {
         let key = Key::from_str(&node_key).unwrap();
         manager.put_record(key, record_key, value);
     }
+
+    async fn remove_record(self, node_key: String, record_key: String) {
+        let mut manager = self.manager.lock().await;
+        let key = Key::from_str(&node_key).unwrap();
+        manager.remove_record(key, record_key);
+    }
+
+    async fn close_node(self, app_handle: AppHandle, node_key: String) -> Result<(), ()> {
+        let key = Key::from_str(&node_key).unwrap();
+        let mut manager = self.manager.lock().await;
+        manager.close_node(key, app_handle)
+    }
 }
 
 type State = Arc<Mutex<Manager>>;
 
 #[derive(Debug, Clone)]
 enum KadEvent {
+    GetRecord { key: Key },
     PutRecord { record: Record },
+    RemoveRecord { key: Key },
+    CloseNode,
 }
 
 #[derive(Default)]
@@ -199,6 +219,16 @@ impl Manager {
             .unwrap();
     }
 
+    fn get_record(&mut self, node_key: Key, record_key: String) {
+        let key = Key::from_str(&record_key).unwrap();
+        let node_sender = match self.nodes.get(&node_key) {
+            Some((_, sender)) => sender,
+            None => return,
+        };
+
+        node_sender.send(KadEvent::GetRecord { key }).unwrap();
+    }
+
     fn put_record(&mut self, node_key: Key, record_key: Option<String>, value: String) {
         let node_sender = match self.nodes.get(&node_key) {
             Some((_, sender)) => sender,
@@ -218,6 +248,24 @@ impl Manager {
 
         let event = KadEvent::PutRecord { record };
         node_sender.send(event).unwrap();
+    }
+
+    fn remove_record(&mut self, node_key: Key, record_key: String) {
+        let key = Key::from_str(&record_key).unwrap();
+        let node_sender = match self.nodes.get(&node_key) {
+            Some((_, sender)) => sender,
+            None => return,
+        };
+        node_sender.send(KadEvent::RemoveRecord { key }).unwrap();
+    }
+
+    fn close_node(&mut self, node_key: Key, app_handle: AppHandle) -> Result<(), ()> {
+        if let Some((_addr, sender)) = self.nodes.remove(&node_key) {
+            sender.send(KadEvent::CloseNode).unwrap();
+            self.remove_bootstrap_node(node_key, app_handle);
+            return Ok(());
+        }
+        Err(())
     }
 }
 
@@ -298,8 +346,18 @@ fn execute_node(
                         continue
                     }
                     match cmd.unwrap() {
-                        KadEvent::PutRecord { record} => {
+                        KadEvent::GetRecord { key } => {
+                            node.get_record(&key);
+                        }
+                        KadEvent::PutRecord { record } => {
                             node.put_record(record, Quorum::One).unwrap();
+                        }
+                        KadEvent::RemoveRecord { key } => {
+                            node.remove_record(&key);
+                        }
+                        KadEvent::CloseNode => {
+                            drop(node);
+                            return
                         }
                     };
                 }

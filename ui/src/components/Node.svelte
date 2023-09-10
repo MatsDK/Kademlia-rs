@@ -1,6 +1,7 @@
 <script lang="ts">
     import type { NodeInfo } from "../lib/bindings";
     import { taurpc } from "../lib/ipc";
+    import { nodes } from "../lib/store";
     import RoutingTable from "./RoutingTable.svelte";
 
     export let node: NodeInfo;
@@ -17,7 +18,17 @@
     let key = "";
     let value = "";
 
-    const getRecord = async (e: SubmitEvent) => {};
+    const getRecord = async (e: SubmitEvent) => {
+        e.preventDefault();
+
+        try {
+            await taurpc.get_record(node.key, key.trim());
+            tab = "Records";
+            key = "";
+        } catch (error) {
+            console.error(error);
+        }
+    };
 
     const putRecord = async (e: SubmitEvent) => {
         e.preventDefault();
@@ -25,6 +36,25 @@
         try {
             await taurpc.put_record(node.key, key.trim() || null, value);
             tab = "Records";
+            key = "";
+            value = "";
+        } catch (error) {
+            console.error(error);
+        }
+    };
+
+    const removeRecord = async (record_key: string) => {
+        try {
+            await taurpc.remove_record(node.key, record_key);
+        } catch (error) {
+            console.error(error);
+        }
+    };
+
+    const stopNode = async () => {
+        try {
+            await taurpc.close_node(node.key);
+            $nodes = $nodes.filter((n) => n.key != node.key);
         } catch (error) {
             console.error(error);
         }
@@ -47,33 +77,59 @@
         </span>
     </div>
     <div class="flex-1 flex flex-col overflow-auto">
-        <div class="flex gap-3 px-2 text-sm">
-            {#each tabs as label}
-                <button
-                    class={cx(
-                        " hover:opacity-100 transition-opacity",
-                        label === tab
-                            ? "opacity-100 font-semibold"
-                            : "opacity-60"
-                    )}
-                    on:click={() => (tab = label)}>{label}</button
-                >
-            {/each}
+        <div class="flex justify-between px-2 text-sm">
+            <div class="flex gap-3">
+                {#each tabs as label}
+                    <button
+                        class={cx(
+                            " hover:opacity-100 transition-opacity",
+                            label === tab
+                                ? "opacity-100 font-semibold"
+                                : "opacity-60"
+                        )}
+                        on:click={() => (tab = label)}>{label}</button
+                    >
+                {/each}
+            </div>
+            <button
+                on:click={stopNode}
+                class="opacity-60 hover:opacity-100 transition-opacity"
+                >Stop</button
+            >
         </div>
         {#if tab === "Records"}
-            {#each node.records ?? [] as [key, publisher, value]}
-                {@const is_publisher = publisher == node.key}
-                <div>
-                    <span>{key}</span>
-                    <span>{value}</span>
-                    {#if is_publisher}
-                        <span
-                            class="bg-gray-300 text-black text-xs px-1 rounded-md font-semibold"
-                            >Publisher</span
-                        >
-                    {/if}
-                </div>
-            {/each}
+            <div class="px-2 my-1 grid grid-cols-2 overflow-hidden gap-1">
+                {#each node.records ?? [] as [key, publisher, value]}
+                    {@const is_publisher = publisher == node.key}
+                    <div
+                        class="group border rounded-sm border-secondary px-2 overflow-hidden text-sm"
+                    >
+                        <div class="max-w-full truncate font-semibold">
+                            {key}
+                        </div>
+                        <pre
+                            class="truncate max-w-full text-secondary-text-lighter">
+
+                            {value}
+                    </pre>
+                        {#if is_publisher}
+                            <div
+                                class="flex justify-end gap-1 items-center pb-px"
+                            >
+                                <button
+                                    class="opacity-0 group-hover:opacity-60 transition-opacity text-xs"
+                                    on:click={() => removeRecord(key)}
+                                    >Remove</button
+                                >
+                                <span
+                                    class="bg-gray-300 text-black text-xs px-1 rounded-md font-semibold h-[16px]"
+                                    >Publisher</span
+                                >
+                            </div>
+                        {/if}
+                    </div>
+                {/each}
+            </div>
         {:else if tab === "Get"}
             <div
                 class="w-full flex-1 flex flex-col justify-center items-center h-full"
@@ -90,6 +146,12 @@
                         type="text"
                         class="bg-primary border border-secondary rounded-md text-sm px-1"
                     />
+
+                    <button
+                        type="submit"
+                        class="bg-gray-300 hover:bg-white text-black transition-colors rounded-md px-2"
+                        >Get record</button
+                    >
                 </form>
             </div>
         {:else if tab === "Put"}

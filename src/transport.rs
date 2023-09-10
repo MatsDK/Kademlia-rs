@@ -150,8 +150,9 @@ impl TcpStream {
             };
 
             if bytes_read == 0 {
-                // continue
-                return Poll::Pending;
+                continue;
+                // This causes the connection thread to end up in an infinite loop once the other node disconnects
+                // return Poll::Pending;
             }
 
             return match bincode::deserialize::<KademliaEvent>(&buf[..bytes_read]) {
