@@ -1611,6 +1611,7 @@ dependencies = [
  "multiaddr",
  "rand 0.8.5",
  "serde",
+ "serde_millis",
  "sha2",
  "socket2 0.4.9",
  "tokio",
@@ -2570,6 +2571,15 @@ checksum = "693151e1ac27563d6dbcec9dee9fbd5da8539b20fa14ad3752b2e6d363ace360"
 dependencies = [
  "itoa 1.0.9",
  "ryu",
+ "serde",
+]
+
+[[package]]
+name = "serde_millis"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6e2dc780ca5ee2c369d1d01d100270203c4ff923d2a4264812d723766434d00"
+dependencies = [
  "serde",
 ]
 

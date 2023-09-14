@@ -1,3 +1,4 @@
+#![allow(non_snake_case)]
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -5,12 +6,15 @@ use futures::StreamExt;
 use kademlia_rs::{
     key::Key,
     multiaddr::{multiaddr, Multiaddr},
-    node::{GetRecordResult, KademliaNode, OutEvent, PutRecordError, PutRecordOk, QueryResult},
+    node::{
+        FoundRecord, GetRecordResult, KademliaNode, OutEvent, PutRecordError, PutRecordOk,
+        QueryResult,
+    },
     query::Quorum,
     routing::Node,
     store::Record,
 };
-use std::{collections::HashMap, str::FromStr, sync::Arc};
+use std::{collections::HashMap, num::NonZeroUsize, str::FromStr, sync::Arc};
 use tauri::AppHandle;
 use tokio::{
     net::TcpListener,
@@ -53,7 +57,7 @@ trait Api {
 
     async fn remove_bootstrap_node(app_handle: AppHandle, key: String);
 
-    // async fn disconnect_node(node_id: String, connect_peer_id: String);
+    async fn disconnect_peer(node_id: String, connect_peer_id: String);
 
     async fn close_node(app_handle: AppHandle, node_id: String) -> Result<(), ()>;
 
@@ -99,19 +103,20 @@ impl Api for ApiImpl {
         manager.remove_bootstrap_node(key, app_handle);
     }
 
+    async fn disconnect_peer(self, node_id: String, connect_peer_id: String) {
+        let manager = self.manager.lock().await;
+        let node_key = Key::from_str(&node_id).unwrap();
+        let connect_peer_key = Key::from_str(&connect_peer_id).unwrap();
+        manager.disconnect_peer(node_key, connect_peer_key);
+    }
+
     async fn get_record(self, node_key: String, record_key: String) {
         let mut manager = self.manager.lock().await;
         let key = Key::from_str(&node_key).unwrap();
         manager.get_record(key, record_key);
     }
 
-    async fn put_record(
-        self,
-        // app_handle: AppHandle,
-        node_key: String,
-        record_key: Option<String>,
-        value: String,
-    ) {
+    async fn put_record(self, node_key: String, record_key: Option<String>, value: String) {
         let mut manager = self.manager.lock().await;
         let key = Key::from_str(&node_key).unwrap();
         manager.put_record(key, record_key, value);
@@ -137,6 +142,7 @@ enum KadEvent {
     GetRecord { key: Key },
     PutRecord { record: Record },
     RemoveRecord { key: Key },
+    DisconnectPeer { key: Key },
     CloseNode,
 }
 
@@ -219,6 +225,17 @@ impl Manager {
             .unwrap();
     }
 
+    fn disconnect_peer(&self, node_key: Key, connect_peer: Key) {
+        let node_sender = match self.nodes.get(&node_key) {
+            Some((_, sender)) => sender,
+            None => return,
+        };
+
+        node_sender
+            .send(KadEvent::DisconnectPeer { key: connect_peer })
+            .unwrap();
+    }
+
     fn get_record(&mut self, node_key: Key, record_key: String) {
         let key = Key::from_str(&record_key).unwrap();
         let node_sender = match self.nodes.get(&node_key) {
@@ -240,11 +257,8 @@ impl Manager {
             Some(key) => Key::from_str(&key).unwrap(),
             None => Key::random(),
         };
-        let record = Record {
-            key,
-            value: value.as_bytes().to_vec(),
-            publisher: Some(node_key),
-        };
+
+        let record = Record::new(key, value.as_bytes().to_vec());
 
         let event = KadEvent::PutRecord { record };
         node_sender.send(event).unwrap();
@@ -304,6 +318,7 @@ fn trigger_store_change_update(node: &KademliaNode, app_handle: AppHandle) {
                  key,
                  value,
                  publisher,
+                 ..
              }| {
                 let publisher = publisher.map(|v| v.to_string()).unwrap_or_default();
                 let value = match String::from_utf8(value.clone()) {
@@ -347,13 +362,16 @@ fn execute_node(
                     }
                     match cmd.unwrap() {
                         KadEvent::GetRecord { key } => {
-                            node.get_record(&key);
+                            node.get_record(key);
                         }
                         KadEvent::PutRecord { record } => {
-                            node.put_record(record, Quorum::One).unwrap();
+                            node.put_record(record, Quorum::N(NonZeroUsize::new(2).unwrap())).unwrap();
                         }
                         KadEvent::RemoveRecord { key } => {
                             node.remove_record(&key);
+                        }
+                        KadEvent::DisconnectPeer { key } => {
+                            let _ = node.disconnect(key);
                         }
                         KadEvent::CloseNode => {
                             drop(node);
@@ -366,7 +384,7 @@ fn execute_node(
                         OutEvent::ConnectionEstablished(_peer_id) => trigger_routing_table_update(&node, app_handle.clone()),
                         OutEvent::ConnectionClosed(_peer_id) => trigger_routing_table_update(&node, app_handle.clone()),
                         OutEvent::StoreChanged(_change) => trigger_store_change_update(&node, app_handle.clone()),
-                        OutEvent::OutBoundQueryProgressed { result } => {
+                        OutEvent::OutBoundQueryProgressed { result, .. } => {
                             match result {
                                 QueryResult::FindNode { nodes, target } => {
                                     println!("> Found nodes closest to {target}");
@@ -385,7 +403,7 @@ fn execute_node(
                                     }
                                 },
                                 QueryResult::GetRecord(result) => match result {
-                                    GetRecordResult::FoundRecord(record) => {
+                                    GetRecordResult::FoundRecord(FoundRecord { record, .. }) => {
                                         println!("> Get record finished: {record}");
                                     }
                                     GetRecordResult::NotFound(key) => {

@@ -1,6 +1,17 @@
 <script lang="ts">
     import { type NodeInfo } from "../lib/bindings";
+    import { taurpc } from "../lib/ipc";
+
     export let buckets: NodeInfo["buckets"];
+    export let node_id: string;
+
+    const disconnectPeer = async (key: string) => {
+        try {
+            await taurpc.disconnect_peer(node_id, key);
+        } catch (error) {
+            console.error(error);
+        }
+    };
 </script>
 
 <div class="flex flex-col overflow-y-scroll h-full w-full absolute text-sm">
@@ -16,16 +27,24 @@
                         <span class="flex-1 text-secondary-text">
                             {addr}
                         </span>
-                        <svg height="20" width="20">
-                            <circle
-                                cx="10"
-                                cy="10"
-                                r="6"
-                                stroke="black"
-                                stroke-width="3"
-                                fill={status === "Connected" ? "green" : "gray"}
-                            />
-                        </svg>
+                        <div>
+                            <button on:click={() => disconnectPeer(key)}
+                                >Disconnect</button
+                            >
+
+                            <svg height="20" width="20">
+                                <circle
+                                    cx="10"
+                                    cy="10"
+                                    r="6"
+                                    stroke="black"
+                                    stroke-width="3"
+                                    fill={status === "Connected"
+                                        ? "green"
+                                        : "gray"}
+                                />
+                            </svg>
+                        </div>
                     </div>
                 {/each}
             </ul>

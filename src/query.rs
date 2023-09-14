@@ -25,9 +25,12 @@ pub enum QueryPoolState<'a> {
 #[derive(Debug)]
 pub struct QueryPool {
     next_query_id: usize,
-    queries: HashMap<usize, Query>,
+    queries: HashMap<QueryId, Query>,
     query_timeout: Duration,
 }
+
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub struct QueryId(pub usize);
 
 impl QueryPool {
     pub fn new() -> Self {
@@ -38,14 +41,15 @@ impl QueryPool {
         }
     }
 
-    pub fn add_query(&mut self, target: Key, peers: Vec<Node>, info: QueryInfo) {
+    pub fn add_query(&mut self, target: Key, peers: Vec<Node>, info: QueryInfo) -> QueryId {
         let query_id = self.next_query_id();
         self.add_query_with_id(query_id, target, peers, info);
+        query_id
     }
 
     pub fn add_query_with_id(
         &mut self,
-        query_id: usize,
+        query_id: QueryId,
         target: Key,
         peers: Vec<Node>,
         info: QueryInfo,
@@ -60,14 +64,14 @@ impl QueryPool {
         self.queries.insert(query_id, query);
     }
 
-    pub fn next_query_id(&mut self) -> usize {
-        let id = self.next_query_id;
+    pub fn next_query_id(&mut self) -> QueryId {
+        let id = QueryId(self.next_query_id);
         self.next_query_id = self.next_query_id.wrapping_add(1);
         id
     }
 
-    pub fn get_mut(&mut self, query_id: &usize) -> Option<&mut Query> {
-        self.queries.get_mut(query_id)
+    pub fn get_mut(&mut self, query_id: QueryId) -> Option<&mut Query> {
+        self.queries.get_mut(&query_id)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &Query> {
@@ -139,14 +143,14 @@ pub struct Query {
     pub query_info: QueryInfo,
     pub waiting_events: HashMap<Key, Vec<KademliaEvent>>,
     peers_iter: PeersIter,
-    id: usize,
+    id: QueryId,
     discovered_addrs: HashMap<Key, Multiaddr>,
     start: Instant,
 }
 
 #[derive(Debug)]
 pub struct QueryResultOutput {
-    pub query_id: usize,
+    pub query_id: QueryId,
     pub nodes: Vec<Node>,
     pub info: QueryInfo,
 }
@@ -202,7 +206,8 @@ pub enum QueryInfo {
 // impl Into<KademliaEvent> for QueryInfo {
 // convert from `QueryInfo` to `KademliaEvent` for sending requests
 impl QueryInfo {
-    fn into_request(&self, request_id: usize) -> KademliaEvent {
+    fn into_request(&self, query_id: QueryId) -> KademliaEvent {
+        let request_id = query_id.0;
         match self {
             QueryInfo::FindNode { target } => KademliaEvent::FindNodeReq {
                 target: target.clone(),
@@ -231,7 +236,7 @@ impl QueryInfo {
 }
 
 impl Query {
-    pub fn new(peers_iter: PeersIter, info: QueryInfo, query_id: usize) -> Self {
+    pub fn new(peers_iter: PeersIter, info: QueryInfo, query_id: QueryId) -> Self {
         Self {
             peers_iter,
             id: query_id,
@@ -240,6 +245,10 @@ impl Query {
             query_info: info,
             start: Instant::now(),
         }
+    }
+
+    pub fn id(&self) -> QueryId {
+        self.id
     }
 
     pub fn get_request(&self) -> KademliaEvent {

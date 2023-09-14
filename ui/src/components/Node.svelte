@@ -192,6 +192,6 @@
             class="absolute top-[-11px] left-2 bg-primary px-2 text-sm text-secondary-text z-10"
             >Routing table</span
         >
-        <RoutingTable buckets={node.buckets} />
+        <RoutingTable buckets={node.buckets} node_id={node.key} />
     </div>
 </div>

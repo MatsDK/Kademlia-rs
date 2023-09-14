@@ -298,9 +298,8 @@ impl KBucket {
     // is accessed.
     fn apply_pending(&mut self) {
         let now = Instant::now();
-        let pending = match self.pending.take() {
-            Some(p) => p,
-            None => return,
+        let Some(pending) = self.pending.take() else {
+            return
         };
 
         if pending.insert_instant > now {

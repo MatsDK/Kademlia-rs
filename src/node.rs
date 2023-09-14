@@ -9,11 +9,15 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
+use std::{
+    fmt,
+    time::{Duration, Instant},
+};
 
 use crate::{
     key::Key,
     pool::{Pool, PoolEvent},
-    query::{PutRecordStep, Query, QueryInfo, QueryPool, QueryPoolState, Quorum},
+    query::{PutRecordStep, Query, QueryId, QueryInfo, QueryPool, QueryPoolState, Quorum},
     routing::{Node, NodeStatus, RoutingTable, UpdateResult},
     store::{Record, RecordStore},
     transport::{socketaddr_to_multiaddr, Transport, TransportEvent},
@@ -30,6 +34,8 @@ pub struct KademliaNode {
     pending_event: Option<(Key, KademliaEvent)>,
     store: RecordStore,
     addr: Multiaddr,
+    /// `None` indicates the records does not expire
+    record_ttl: Option<Duration>,
 }
 
 impl KademliaNode {
@@ -48,11 +54,18 @@ impl KademliaNode {
             pending_event: None,
             store: RecordStore::new(key),
             addr,
+            record_ttl: Some(Duration::from_secs(60 * 60 * 36)), // 36h
         })
     }
 
     pub fn get_addr(&self) -> &Multiaddr {
         &self.addr
+    }
+
+    /// Sets the TTL for stored records, `None` indicates the record never expires.
+    pub fn set_record_ttl(&mut self, record_ttl: Option<Duration>) -> &mut Self {
+        self.record_ttl = record_ttl;
+        self
     }
 
     pub fn dial(&mut self, addr: impl Into<Multiaddr>) -> Result<(), ()> {
@@ -103,19 +116,23 @@ impl KademliaNode {
         }
     }
 
-    pub fn bootstrap(&mut self) -> io::Result<()> {
+    pub fn bootstrap(&mut self) -> Result<QueryId, NoKnownPeers> {
         let local_key = self.routing_table.local_key.clone();
 
         let peers = self.routing_table.closest_nodes(&local_key);
-        let query_info = QueryInfo::Bootstrap {
-            target: local_key.clone(),
-        };
-        self.queries.add_query(local_key.clone(), peers, query_info);
-
-        Ok(())
+        if peers.is_empty() {
+            Err(NoKnownPeers)
+        } else {
+            let query_info = QueryInfo::Bootstrap {
+                target: local_key.clone(),
+            };
+            Ok(self.queries.add_query(local_key.clone(), peers, query_info))
+        }
     }
 
-    pub fn put_record(&mut self, record: Record, quorum: Quorum) -> Result<(), String> {
+    pub fn put_record(&mut self, mut record: Record, quorum: Quorum) -> Result<QueryId, ()> {
+        record.set_publisher(*self.local_key());
+        // TODO: errors for store with `thiserror`
         self.store.put(record.clone()).unwrap();
 
         self.queued_events
@@ -133,25 +150,49 @@ impl KademliaNode {
             step: PutRecordStep::FindNodes,
             quorum: quorum.into(),
         };
-        self.queries.add_query(target, peers, query_info);
-
-        Ok(())
+        Ok(self.queries.add_query(target, peers, query_info))
     }
 
-    pub fn get_record(&mut self, key: &Key) -> Option<&Record> {
-        if let Some(record) = self.store.get(key) {
-            return Some(record);
-        }
-
-        let peers = self.routing_table.closest_nodes(key);
-        let query_info = QueryInfo::GetRecord {
-            key: key.clone(),
-            found_a_record: false,
+    pub fn get_record(&mut self, key: Key) -> QueryId {
+        let record: Option<FoundRecord> = if let Some(record) = self.store.get(&key) {
+            if record.is_expired(Instant::now()) {
+                self.store.remove(&key);
+                None
+            } else {
+                Some(FoundRecord {
+                    source: self.local_key().clone(),
+                    record: record.into_owned(),
+                })
+            }
+        } else {
+            None
         };
 
-        self.queries.add_query(*key, peers, query_info);
+        let query_info = if record.is_some() {
+            QueryInfo::GetRecord {
+                key,
+                found_a_record: true,
+            }
+        } else {
+            QueryInfo::GetRecord {
+                key,
+                found_a_record: false,
+            }
+        };
 
-        None
+        let peers = self.routing_table.closest_nodes(&key);
+        let id = self.queries.add_query(key, peers, query_info);
+
+        if let Some(record) = record {
+            let out_ev = OutEvent::OutBoundQueryProgressed {
+                id,
+                result: QueryResult::GetRecord(GetRecordResult::FoundRecord(record)),
+            };
+            self.queued_events
+                .push_back(NodeEvent::GenerateEvent(out_ev));
+        }
+
+        id
     }
 
     // Removes the record locally, only remove if you are the publisher
@@ -201,13 +242,13 @@ impl KademliaNode {
         }
     }
 
-    pub fn find_node(&mut self, target: &Key) {
+    pub fn find_node(&mut self, target: &Key) -> QueryId {
         let peers = self.routing_table.closest_nodes(target);
 
         let query_info = QueryInfo::FindNode {
             target: target.clone(),
         };
-        self.queries.add_query(target.clone(), peers, query_info);
+        self.queries.add_query(target.clone(), peers, query_info)
     }
 
     fn record_received(&mut self, peer_id: Key, record: Record, request_id: usize) {
@@ -255,7 +296,7 @@ impl KademliaNode {
             } => {
                 let local_key = self.local_key().clone();
 
-                if let Some(query) = self.queries.get_mut(&request_id) {
+                if let Some(query) = self.queries.get_mut(QueryId(request_id)) {
                     query.on_success(&peer_id, closest_nodes, local_key);
                 }
             }
@@ -265,7 +306,7 @@ impl KademliaNode {
             KademliaEvent::PutRecordRes { request_id } => {
                 let local_key = self.local_key().clone();
 
-                if let Some(query) = self.queries.get_mut(&request_id) {
+                if let Some(query) = self.queries.get_mut(QueryId(request_id)) {
                     query.on_success(&peer_id, vec![], local_key);
 
                     if let QueryInfo::PutRecord {
@@ -275,6 +316,7 @@ impl KademliaNode {
                     } = &mut query.query_info
                     {
                         put_success.push(peer_id);
+                        println!("add to put_success: {}", peer_id);
 
                         // Quorum is reached -> query should be finished
                         if put_success.len() >= quorum.get() {
@@ -284,13 +326,24 @@ impl KademliaNode {
                 }
             }
             KademliaEvent::GetRecordReq { key, request_id } => {
-                let record = self.store.get(&key);
+                let record = match self.store.get(&key) {
+                    Some(record) => {
+                        if record.is_expired(Instant::now()) {
+                            self.store.remove(&key);
+                            None
+                        } else {
+                            Some(record.into_owned())
+                        }
+                    }
+                    None => None,
+                };
+
                 let closer_nodes = self.routing_table.closest_nodes(&key);
 
                 self.queued_events.push_back(NodeEvent::Notify {
                     peer_id,
                     event: KademliaEvent::GetRecordRes {
-                        record: record.cloned(),
+                        record,
                         closer_nodes,
                         request_id,
                     },
@@ -303,7 +356,7 @@ impl KademliaNode {
             } => {
                 let local_key = self.local_key().clone();
 
-                if let Some(query) = self.queries.get_mut(&request_id) {
+                if let Some(query) = self.queries.get_mut(QueryId(request_id)) {
                     if let QueryInfo::GetRecord {
                         ref mut found_a_record,
                         ..
@@ -312,8 +365,12 @@ impl KademliaNode {
                         if let Some(record) = record {
                             *found_a_record = true;
                             let out_ev = OutEvent::OutBoundQueryProgressed {
+                                id: QueryId(request_id),
                                 result: QueryResult::GetRecord(GetRecordResult::FoundRecord(
-                                    record,
+                                    FoundRecord {
+                                        source: peer_id,
+                                        record,
+                                    },
                                 )),
                             };
                             self.queued_events
@@ -399,10 +456,12 @@ impl KademliaNode {
     }
 
     fn query_finished(&mut self, query: Query) -> Option<NodeEvent> {
+        let id = query.id();
         let query_result = query.result();
         match query_result.info {
             QueryInfo::FindNode { target } => {
                 let out_ev = OutEvent::OutBoundQueryProgressed {
+                    id,
                     result: QueryResult::FindNode {
                         target,
                         nodes: query_result.keys(),
@@ -454,6 +513,7 @@ impl KademliaNode {
                 };
 
                 let out_ev = OutEvent::OutBoundQueryProgressed {
+                    id,
                     result: QueryResult::PutRecord(res),
                 };
 
@@ -467,6 +527,7 @@ impl KademliaNode {
                     None
                 } else {
                     let out_ev = OutEvent::OutBoundQueryProgressed {
+                        id,
                         result: QueryResult::GetRecord(GetRecordResult::NotFound(key)),
                     };
                     Some(NodeEvent::GenerateEvent(out_ev))
@@ -476,6 +537,7 @@ impl KademliaNode {
                 // TODO: should refresh the furthest away buckets
                 // https://github.com/libp2p/rust-libp2p/blob/master/protocols/kad/src/behaviour.rs#L1232-L1301
                 let out_ev = OutEvent::OutBoundQueryProgressed {
+                    id,
                     result: QueryResult::Bootstrap,
                 };
                 Some(NodeEvent::GenerateEvent(out_ev))
@@ -657,7 +719,7 @@ pub enum NodeEvent {
 
 #[derive(Debug, Clone)]
 pub enum OutEvent {
-    OutBoundQueryProgressed { result: QueryResult },
+    OutBoundQueryProgressed { id: QueryId, result: QueryResult },
     ConnectionEstablished(Key),
     ConnectionClosed(Key),
     StoreChanged(StoreChangedEvent),
@@ -696,6 +758,23 @@ pub enum PutRecordError {
 
 #[derive(Debug, Clone)]
 pub enum GetRecordResult {
-    FoundRecord(Record),
+    FoundRecord(FoundRecord),
     NotFound(Key),
 }
+
+#[derive(Debug, Clone)]
+pub struct FoundRecord {
+    pub source: Key,
+    pub record: Record,
+}
+
+#[derive(Debug, Clone)]
+pub struct NoKnownPeers;
+
+impl fmt::Display for NoKnownPeers {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "No known peers.")
+    }
+}
+
+impl std::error::Error for NoKnownPeers {}

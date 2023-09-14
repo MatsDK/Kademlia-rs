@@ -9,7 +9,7 @@ use tokio::io::{stdin, AsyncBufReadExt, BufReader};
 
 use kademlia_rs::key::Key;
 use kademlia_rs::node::{
-    GetRecordResult, KademliaNode, OutEvent, PutRecordError, PutRecordOk, QueryResult,
+    FoundRecord, GetRecordResult, KademliaNode, OutEvent, PutRecordError, PutRecordOk, QueryResult,
     StoreChangedEvent,
 };
 use kademlia_rs::query::Quorum;
@@ -39,6 +39,7 @@ async fn main() -> io::Result<()> {
     };
 
     let mut node = KademliaNode::new(key, addr).await?;
+    node.set_record_ttl(None);
 
     if let Some(dial) = dial {
         let key = Key::from_str(BOOTSTRAP_NODE_KEY).unwrap();
@@ -80,12 +81,7 @@ async fn main() -> io::Result<()> {
                             }
                         };
 
-                        let record = Record {
-                            key,
-                            value,
-                            publisher: Some(node.local_key().clone()),
-                        };
-
+                        let record = Record::new(key, value);
                         // let q = Quorum::N(NonZeroUsize::new(4).unwrap());
                         let q = Quorum::One;
                         node.put_record(record, q).unwrap();
@@ -98,9 +94,7 @@ async fn main() -> io::Result<()> {
                             }
                         };
 
-                        if let Some(record) = node.get_record(&key) {
-                            println!("Found record locally: {record}");
-                        }
+                        node.get_record(key);
                     }
                     Some("REMOVE") => {
                         let key = {
@@ -132,7 +126,7 @@ async fn main() -> io::Result<()> {
                             println!("> Successfully remove record locally: {record_key}");
                         }
                     }
-                    OutEvent::OutBoundQueryProgressed { result } => {
+                    OutEvent::OutBoundQueryProgressed { result, .. } => {
                         match result {
                             QueryResult::FindNode { nodes, target } => {
                                 println!("> Found nodes closest to {target}");
@@ -151,7 +145,7 @@ async fn main() -> io::Result<()> {
                                 }
                             },
                             QueryResult::GetRecord(result) => match result {
-                                GetRecordResult::FoundRecord(record) => {
+                                GetRecordResult::FoundRecord(FoundRecord{record, ..}) => {
                                     println!("> Get record finished: {record}");
                                 }
                                 GetRecordResult::NotFound(key) => {
