@@ -21,6 +21,7 @@ use crate::{
     routing::{Node, NodeStatus, RoutingTable, UpdateResult},
     store::{Record, RecordStore},
     transport::{socketaddr_to_multiaddr, Transport, TransportEvent},
+    K_VALUE,
 };
 
 #[derive(Debug)]
@@ -135,6 +136,13 @@ impl KademliaNode {
         // TODO: errors for store with `thiserror`
         self.store.put(record.clone()).unwrap();
 
+        record.expires = record
+            .expires
+            .or_else(|| self.record_ttl.map(|ttl| Instant::now() + ttl));
+
+        // TODO: evaluate quorum
+
+        // TODO: make debug feature only
         self.queued_events
             .push_back(NodeEvent::GenerateEvent(OutEvent::StoreChanged(
                 StoreChangedEvent::PutRecord {
@@ -251,12 +259,43 @@ impl KademliaNode {
         self.queries.add_query(target.clone(), peers, query_info)
     }
 
-    fn record_received(&mut self, peer_id: Key, record: Record, request_id: usize) {
-        self.store.put(record.clone()).unwrap();
-        self.queued_events
-            .push_back(NodeEvent::GenerateEvent(OutEvent::StoreChanged(
-                StoreChangedEvent::PutRecord { record },
-            )));
+    fn record_received(&mut self, peer_id: Key, mut record: Record, request_id: usize) {
+        if record.publisher.as_ref() == Some(self.local_key()) {
+            // If the publisher is the local node, the record should not be overwritten
+            // in local storage.
+            self.queued_events.push_back(NodeEvent::Notify {
+                peer_id,
+                event: KademliaEvent::PutRecordRes { request_id },
+            });
+            return;
+        }
+
+        let now = Instant::now();
+
+        // Calculate the expiration exponentially inversely proportional to the number of nodes between
+        // the local node and the closest node to the record's key. This avoids over-caching outside the
+        // K-closest nodes to the record.
+        let num_between = self.routing_table.count_nodes_between(&record.key);
+        let num_beyond_k = (usize::max(K_VALUE, num_between) - K_VALUE) as u32;
+        let expiration = self
+            .record_ttl
+            .map(|ttl| now + exp_decrease(ttl, num_beyond_k));
+        // The record is stored forever if the local TTL and the records expiration is `None`.
+        record.expires = record.expires.or(expiration).min(expiration);
+
+        if !record.is_expired(now) {
+            match self.store.put(record.clone()) {
+                Ok(()) => {
+                    // TODO: only with debug feature
+                    self.queued_events
+                        .push_back(NodeEvent::GenerateEvent(OutEvent::StoreChanged(
+                            StoreChangedEvent::PutRecord { record },
+                        )));
+                }
+                // TODO: error handling
+                Err(()) => {}
+            }
+        }
 
         self.queued_events.push_back(NodeEvent::Notify {
             peer_id,
@@ -778,3 +817,9 @@ impl fmt::Display for NoKnownPeers {
 }
 
 impl std::error::Error for NoKnownPeers {}
+
+/// Exponentially decrease the given duration (base 2).
+/// https://github.com/libp2p/rust-libp2p/blob/master/protocols/kad/src/behaviour.rs#L2054
+fn exp_decrease(ttl: Duration, exp: u32) -> Duration {
+    Duration::from_secs(ttl.as_secs().checked_shr(exp).unwrap_or(0))
+}

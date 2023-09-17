@@ -125,6 +125,34 @@ impl RoutingTable {
         closest
     }
 
+    pub fn count_nodes_between(&self, target: &Key) -> usize {
+        let distance = target.distance(&self.local_key);
+        let mut count = 0;
+
+        let mut bucket_idx = BucketIndex::new(&distance);
+
+        if bucket_idx.is_none() {
+            bucket_idx = Some(BucketIndex(0));
+        }
+
+        // First, count closer nodes in the target's bucket
+        let index = bucket_idx.unwrap().index();
+        let bucket = &self.kbuckets[index];
+        count += bucket
+            .get_nodes()
+            .iter()
+            .filter(|&Node { key, .. }| key.distance(&self.local_key) <= distance)
+            .count();
+
+        // Count all other nodes to the left
+        count += (0..index)
+            .rev()
+            .map(|i| self.kbuckets[i].count_nodes())
+            .sum::<usize>();
+
+        count
+    }
+
     pub fn get_addr(&self, peer: &Key) -> Option<&Multiaddr> {
         let d = self.local_key.distance(peer);
         let bucket_idx = BucketIndex::new(&d);
@@ -256,6 +284,10 @@ impl KBucket {
 
     fn get_nodes(&self) -> Vec<Node> {
         self.nodes.to_vec()
+    }
+
+    fn count_nodes(&self) -> usize {
+        self.nodes.len()
     }
 
     fn get_node(&self, key: Key) -> Option<&Node> {
