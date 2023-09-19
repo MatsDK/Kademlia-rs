@@ -17,11 +17,15 @@ use std::{
 use crate::{
     key::Key,
     pool::{Pool, PoolEvent},
-    query::{PutRecordStep, Query, QueryId, QueryInfo, QueryPool, QueryPoolState, Quorum},
+    query::{
+        PutRecordContext, PutRecordStep, Query, QueryId, QueryInfo, QueryPool, QueryPoolState,
+        Quorum,
+    },
+    republish::RepublishJob,
     routing::{Node, NodeStatus, RoutingTable, UpdateResult},
     store::{Record, RecordStore},
     transport::{socketaddr_to_multiaddr, Transport, TransportEvent},
-    K_VALUE,
+    JOB_MAX_NEW_QUERIES, K_VALUE, MAX_QUERIES,
 };
 
 #[derive(Debug)]
@@ -37,13 +41,20 @@ pub struct KademliaNode {
     addr: Multiaddr,
     /// `None` indicates the records does not expire
     record_ttl: Option<Duration>,
+    republish_job: RepublishJob,
 }
 
 impl KademliaNode {
     pub async fn new(key: Key, addr: impl Into<Multiaddr>) -> io::Result<Self> {
         let addr = addr.into();
-        // println!(">> Listening {addr} >> {key}");
         let transport = Transport::new(&addr).await.unwrap();
+
+        let republish_job = RepublishJob::new(
+            key,
+            Some(Duration::from_secs(60 * 60 * 36)),
+            Duration::from_secs(60 * 60 * 1),
+            Duration::from_secs(60 * 60 * 24),
+        );
 
         Ok(Self {
             routing_table: RoutingTable::new(key.clone()),
@@ -56,6 +67,7 @@ impl KademliaNode {
             store: RecordStore::new(key),
             addr,
             record_ttl: Some(Duration::from_secs(60 * 60 * 36)), // 36h
+            republish_job,
         })
     }
 
@@ -156,6 +168,7 @@ impl KademliaNode {
         let query_info = QueryInfo::PutRecord {
             record,
             step: PutRecordStep::FindNodes,
+            context: PutRecordContext::Publish,
             quorum: quorum.into(),
         };
         Ok(self.queries.add_query(target, peers, query_info))
@@ -513,12 +526,14 @@ impl KademliaNode {
                 record,
                 step: PutRecordStep::FindNodes,
                 quorum,
+                context,
             } => {
                 let target = record.key.clone();
 
                 let query_info = QueryInfo::PutRecord {
                     record,
                     quorum,
+                    context,
                     step: PutRecordStep::PutRecord {
                         put_success: vec![],
                     },
@@ -537,6 +552,7 @@ impl KademliaNode {
                 record,
                 step: PutRecordStep::PutRecord { put_success },
                 quorum,
+                ..
             } => {
                 let key = record.key;
                 let res = {
@@ -584,7 +600,26 @@ impl KademliaNode {
         }
     }
 
-    fn poll_next_query(&mut self) -> Poll<NodeEvent> {
+    fn poll_next_query(&mut self, cx: &mut Context<'_>) -> Poll<NodeEvent> {
+        let now = Instant::now();
+
+        // Available capacity for republish/replicate queries.
+        let jobs_query_capacity = MAX_QUERIES.saturating_sub(self.queries.size());
+
+        let max_queries = usize::min(JOB_MAX_NEW_QUERIES, jobs_query_capacity);
+        for _ in 0..max_queries {
+            if let Poll::Ready(record) = self.republish_job.poll(cx, &mut self.store, now) {
+                let put_context = if record.publisher.as_ref() == Some(self.local_key()) {
+                    PutRecordContext::Republish
+                } else {
+                    PutRecordContext::Replicate
+                };
+                // self.publish_record(record, Quorum::All, context)
+            } else {
+                break;
+            }
+        }
+
         loop {
             // first get all the queued events from previous iterations
             if let Some(ev) = self.queued_events.pop_front() {
@@ -649,7 +684,7 @@ impl KademliaNode {
                 }
                 None => {
                     // Poll next query
-                    match self.poll_next_query() {
+                    match self.poll_next_query(cx) {
                         Poll::Pending => {}
                         Poll::Ready(ev) => {
                             if let Some(NodeEvent::GenerateEvent(ev)) =
@@ -700,7 +735,7 @@ impl KademliaNode {
     #[cfg(feature = "debug")]
     // Return locally stored records
     pub fn get_record_store(&self) -> Vec<&Record> {
-        self.store.get_all_records()
+        self.store.all_records()
     }
 }
 

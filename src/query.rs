@@ -41,6 +41,10 @@ impl QueryPool {
         }
     }
 
+    pub fn size(&self) -> usize {
+        self.queries.len()
+    }
+
     pub fn add_query(&mut self, target: Key, peers: Vec<Node>, info: QueryInfo) -> QueryId {
         let query_id = self.next_query_id();
         self.add_query_with_id(query_id, target, peers, info);
@@ -170,6 +174,13 @@ pub enum PutRecordStep {
 }
 
 #[derive(Debug)]
+pub enum PutRecordContext {
+    Publish,
+    Republish,
+    Replicate,
+}
+
+#[derive(Debug)]
 pub enum Quorum {
     One,
     N(NonZeroUsize),
@@ -192,6 +203,7 @@ pub enum QueryInfo {
     PutRecord {
         record: Record,
         step: PutRecordStep,
+        context: PutRecordContext,
         quorum: NonZeroUsize,
     },
     GetRecord {

@@ -50,8 +50,8 @@ impl RecordStore {
         self.records.remove(key);
     }
 
-    // #[cfg(feature = "debug")]
-    pub fn get_all_records(&self) -> Vec<&Record> {
+    // TODO: return Cow::borrowed
+    pub fn all_records(&self) -> Vec<&Record> {
         self.records
             .iter()
             .map(|(_, record)| record)
