@@ -13,9 +13,9 @@ use crate::{
 pub struct RepublishJob {
     local_key: Key,
     record_ttl: Option<Duration>,
-    republish_interval: Duration,
+    republish_interval: Option<Duration>,
     replication_interval: Duration,
-    next_publish: Instant,
+    next_publish: Option<Instant>,
     state: JobState,
 }
 
@@ -30,10 +30,10 @@ impl RepublishJob {
         local_key: Key,
         record_ttl: Option<Duration>,
         replication_interval: Duration,
-        republish_interval: Duration,
+        republish_interval: Option<Duration>,
     ) -> Self {
         let now = Instant::now();
-        let next_publish = now + republish_interval;
+        let next_publish = republish_interval.map(|i| now + i);
 
         Self {
             local_key,
@@ -51,9 +51,11 @@ impl RepublishJob {
         store: &mut RecordStore,
         now: Instant,
     ) -> Poll<Record> {
+        // println!("Poll replicate job");
         if let JobState::Waiting(deadline) = self.state {
             if now >= deadline {
-                let should_publish = now >= self.next_publish;
+                let should_publish = self.next_publish.map_or(false, |i| now >= i);
+                // println!("Run replicate cycle, should publish this cycle: {should_publish}");
 
                 let records = store
                     .all_records()
@@ -79,7 +81,7 @@ impl RepublishJob {
 
                 // If this iteration is republishing records, set the next republish deadline.
                 if should_publish {
-                    self.next_publish = now + self.republish_interval;
+                    self.next_publish = self.republish_interval.map(|i| now + i);
                 }
 
                 self.state = JobState::Running(records);
@@ -87,6 +89,7 @@ impl RepublishJob {
         }
 
         if let JobState::Running(records) = &mut self.state {
+            // println!("Running the replication/republishing, records: {records:?}");
             for record in records {
                 if record.is_expired(now) {
                     store.remove(&record.key)
@@ -94,6 +97,8 @@ impl RepublishJob {
                     return Poll::Ready(record);
                 }
             }
+
+            // println!("done running");
 
             // After all records are republished/replicated, reset the state to waiting.
             let next_deadline = now + self.replication_interval;

@@ -9,8 +9,8 @@ use tokio::io::{stdin, AsyncBufReadExt, BufReader};
 
 use kademlia_rs::key::Key;
 use kademlia_rs::node::{
-    FoundRecord, GetRecordResult, KademliaNode, OutEvent, PutRecordError, PutRecordOk, QueryResult,
-    StoreChangedEvent,
+    FoundRecord, GetRecordResult, KademliaConfig, KademliaNode, OutEvent, PutRecordError,
+    PutRecordOk, QueryResult, StoreChangedEvent,
 };
 use kademlia_rs::query::Quorum;
 use kademlia_rs::store::Record;
@@ -38,8 +38,9 @@ async fn main() -> io::Result<()> {
         Key::from_str(BOOTSTRAP_NODE_KEY).unwrap()
     };
 
-    let mut node = KademliaNode::new(key, addr).await?;
-    node.set_record_ttl(None);
+    let mut config = KademliaConfig::default();
+    config.set_record_ttl(None);
+    let mut node = KademliaNode::new(key, addr, config).await?;
 
     if let Some(dial) = dial {
         let key = Key::from_str(BOOTSTRAP_NODE_KEY).unwrap();

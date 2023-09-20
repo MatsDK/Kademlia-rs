@@ -40,7 +40,7 @@ export type NodeInfo = {
 
 const ARGS_MAP = {
   "":
-    "{\"bootstrap_nodes_changed\":[\"bootstrap_nodes\"],\"new_node\":[],\"put_record\":[\"node_key\",\"record_key\",\"value\"],\"record_store_changed\":[\"records\"],\"remove_bootstrap_node\":[\"key\"],\"routing_table_changed\":[\"routing_table\"],\"add_bootstrap_node\":[\"key\"],\"get_record\":[\"node_key\",\"record_key\"],\"disconnect_peer\":[\"node_id\",\"connect_peer_id\"],\"close_node\":[\"node_id\"],\"remove_record\":[\"node_key\",\"record_key\"]}",
+    "{\"put_record\":[\"node_key\",\"record_key\",\"value\"],\"close_node\":[\"node_id\"],\"remove_bootstrap_node\":[\"key\"],\"bootstrap_nodes_changed\":[\"bootstrap_nodes\"],\"routing_table_changed\":[\"routing_table\"],\"add_bootstrap_node\":[\"key\"],\"new_node\":[],\"record_store_changed\":[\"records\"],\"get_record\":[\"node_key\",\"record_key\"],\"disconnect_peer\":[\"node_id\",\"connect_peer_id\"],\"remove_record\":[\"node_key\",\"record_key\"]}",
 };
 import { createTauRPCProxy as createProxy } from "taurpc";
 

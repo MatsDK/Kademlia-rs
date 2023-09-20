@@ -28,8 +28,57 @@ use crate::{
     JOB_MAX_NEW_QUERIES, K_VALUE, MAX_QUERIES,
 };
 
+#[derive(Debug, Clone)]
+pub struct KademliaConfig {
+    /// `None` indicates not expiration of records
+    record_ttl: Option<Duration>,
+    replication_interval: Option<Duration>,
+    republish_interval: Option<Duration>,
+}
+
+impl Default for KademliaConfig {
+    fn default() -> Self {
+        Self {
+            record_ttl: Some(Duration::from_secs(60 * 60 * 36)),
+            replication_interval: Some(Duration::from_secs(60 * 60 * 1)),
+            republish_interval: Some(Duration::from_secs(60 * 60 * 24)),
+        }
+    }
+}
+
+impl KademliaConfig {
+    /// Set the TTL for records. It should be longer than the republication interval.
+    /// `None` indicates records never expire. Default: 36h
+    pub fn set_record_ttl(&mut self, record_ttl: Option<Duration>) -> &mut Self {
+        self.record_ttl = record_ttl;
+        self
+    }
+
+    /// Set the rereplication interval. This is used to ensure that records are
+    /// always replicated to the nodes closest to the record. This operation does
+    /// not extend the expiry of the record. This interval should be shorten than
+    /// the publication interval.
+    ///
+    /// `None` means that stored records are never re-replicated. Default: 1h
+    pub fn set_replication_interval(&mut self, interval: Option<Duration>) -> &mut Self {
+        self.replication_interval = interval;
+        self
+    }
+
+    /// Set the republish interval. This is used for extending the local lifetime of
+    /// local records. This should be shorter than the default record TTL to ensure
+    /// records do not expire before republishing them.
+    ///
+    /// `None` means that records are never republished. Default: 24h
+    pub fn set_publication_interval(&mut self, interval: Option<Duration>) -> &mut Self {
+        self.republish_interval = interval;
+        self
+    }
+}
+
 #[derive(Debug)]
 pub struct KademliaNode {
+    config: KademliaConfig,
     routing_table: RoutingTable,
     transport: Transport,
     pool: Pool,
@@ -39,24 +88,29 @@ pub struct KademliaNode {
     pending_event: Option<(Key, KademliaEvent)>,
     store: RecordStore,
     addr: Multiaddr,
-    /// `None` indicates the records does not expire
-    record_ttl: Option<Duration>,
-    republish_job: RepublishJob,
+    republish_job: Option<RepublishJob>,
 }
 
 impl KademliaNode {
-    pub async fn new(key: Key, addr: impl Into<Multiaddr>) -> io::Result<Self> {
+    pub async fn new(
+        key: Key,
+        addr: impl Into<Multiaddr>,
+        config: KademliaConfig,
+    ) -> io::Result<Self> {
         let addr = addr.into();
         let transport = Transport::new(&addr).await.unwrap();
 
-        let republish_job = RepublishJob::new(
-            key,
-            Some(Duration::from_secs(60 * 60 * 36)),
-            Duration::from_secs(60 * 60 * 1),
-            Duration::from_secs(60 * 60 * 24),
-        );
+        let republish_job = config.replication_interval.map(|replication_interval| {
+            RepublishJob::new(
+                key,
+                config.record_ttl,
+                replication_interval,
+                config.republish_interval,
+            )
+        });
 
         Ok(Self {
+            config,
             routing_table: RoutingTable::new(key.clone()),
             transport,
             pool: Pool::new(key.clone()),
@@ -66,19 +120,12 @@ impl KademliaNode {
             pending_event: None,
             store: RecordStore::new(key),
             addr,
-            record_ttl: Some(Duration::from_secs(60 * 60 * 36)), // 36h
             republish_job,
         })
     }
 
     pub fn get_addr(&self) -> &Multiaddr {
         &self.addr
-    }
-
-    /// Sets the TTL for stored records, `None` indicates the record never expires.
-    pub fn set_record_ttl(&mut self, record_ttl: Option<Duration>) -> &mut Self {
-        self.record_ttl = record_ttl;
-        self
     }
 
     pub fn dial(&mut self, addr: impl Into<Multiaddr>) -> Result<(), ()> {
@@ -150,7 +197,7 @@ impl KademliaNode {
 
         record.expires = record
             .expires
-            .or_else(|| self.record_ttl.map(|ttl| Instant::now() + ttl));
+            .or_else(|| self.config.record_ttl.map(|ttl| Instant::now() + ttl));
 
         // TODO: evaluate quorum
 
@@ -291,6 +338,7 @@ impl KademliaNode {
         let num_between = self.routing_table.count_nodes_between(&record.key);
         let num_beyond_k = (usize::max(K_VALUE, num_between) - K_VALUE) as u32;
         let expiration = self
+            .config
             .record_ttl
             .map(|ttl| now + exp_decrease(ttl, num_beyond_k));
         // The record is stored forever if the local TTL and the records expiration is `None`.
@@ -368,7 +416,6 @@ impl KademliaNode {
                     } = &mut query.query_info
                     {
                         put_success.push(peer_id);
-                        println!("add to put_success: {}", peer_id);
 
                         // Quorum is reached -> query should be finished
                         if put_success.len() >= quorum.get() {
@@ -606,20 +653,23 @@ impl KademliaNode {
         // Available capacity for republish/replicate queries.
         let jobs_query_capacity = MAX_QUERIES.saturating_sub(self.queries.size());
 
-        let max_queries = usize::min(JOB_MAX_NEW_QUERIES, jobs_query_capacity);
-        for _ in 0..max_queries {
-            if let Poll::Ready(record) = self.republish_job.poll(cx, &mut self.store, now) {
-                let put_context = if record.publisher.as_ref() == Some(self.local_key()) {
-                    PutRecordContext::Republish
+        if let Some(mut job) = self.republish_job.take() {
+            let max_queries = usize::min(JOB_MAX_NEW_QUERIES, jobs_query_capacity);
+            for _ in 0..max_queries {
+                if let Poll::Ready(record) = job.poll(cx, &mut self.store, now) {
+                    let put_context = if record.publisher.as_ref() == Some(self.local_key()) {
+                        PutRecordContext::Republish
+                    } else {
+                        PutRecordContext::Replicate
+                    };
+                    // self.publish_record(record, Quorum::All, context)
                 } else {
-                    PutRecordContext::Replicate
-                };
-                // self.publish_record(record, Quorum::All, context)
-            } else {
-                break;
+                    break;
+                }
             }
-        }
 
+            self.republish_job = Some(job);
+        }
         loop {
             // first get all the queued events from previous iterations
             if let Some(ev) = self.queued_events.pop_front() {

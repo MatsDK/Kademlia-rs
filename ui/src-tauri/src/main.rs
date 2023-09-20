@@ -7,14 +7,14 @@ use kademlia_rs::{
     key::Key,
     multiaddr::{multiaddr, Multiaddr},
     node::{
-        FoundRecord, GetRecordResult, KademliaNode, OutEvent, PutRecordError, PutRecordOk,
-        QueryResult,
+        FoundRecord, GetRecordResult, KademliaConfig, KademliaNode, OutEvent, PutRecordError,
+        PutRecordOk, QueryResult,
     },
     query::Quorum,
     routing::Node,
     store::Record,
 };
-use std::{collections::HashMap, num::NonZeroUsize, str::FromStr, sync::Arc};
+use std::{collections::HashMap, num::NonZeroUsize, str::FromStr, sync::Arc, time::Duration};
 use tauri::AppHandle;
 use tokio::{
     net::TcpListener,
@@ -168,8 +168,11 @@ impl Manager {
 
         let (tx, rx) = channel(32);
 
+        let mut config = KademliaConfig::default();
+        config.set_replication_interval(Some(Duration::from_secs(60)));
+        config.set_publication_interval(Some(Duration::from_secs(120)));
         // This function should return an error that implements thiserror::Error
-        let mut node = KademliaNode::new(key, addr.clone()).await.unwrap();
+        let mut node = KademliaNode::new(key, addr.clone(), config).await.unwrap();
         self.nodes.insert(key, (node.get_addr().clone(), tx));
 
         if is_bootstrap {
