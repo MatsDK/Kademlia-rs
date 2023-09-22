@@ -184,6 +184,7 @@ pub enum PutRecordContext {
 pub enum Quorum {
     One,
     N(NonZeroUsize),
+    All,
 }
 
 impl Into<NonZeroUsize> for Quorum {
@@ -191,6 +192,7 @@ impl Into<NonZeroUsize> for Quorum {
         match self {
             Quorum::One => NonZeroUsize::new(1).expect("Quorum is set to one"),
             Quorum::N(n) => NonZeroUsize::min(NonZeroUsize::new(K_VALUE).expect("K_VALUE > 0"), n),
+            Quorum::All => NonZeroUsize::new(K_VALUE).expect("K_VALUE > 0"),
         }
     }
 }

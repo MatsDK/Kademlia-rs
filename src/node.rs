@@ -199,8 +199,6 @@ impl KademliaNode {
             .expires
             .or_else(|| self.config.record_ttl.map(|ttl| Instant::now() + ttl));
 
-        // TODO: evaluate quorum
-
         // TODO: make debug feature only
         self.queued_events
             .push_back(NodeEvent::GenerateEvent(OutEvent::StoreChanged(
@@ -216,6 +214,24 @@ impl KademliaNode {
             record,
             step: PutRecordStep::FindNodes,
             context: PutRecordContext::Publish,
+            quorum: quorum.into(),
+        };
+        Ok(self.queries.add_query(target, peers, query_info))
+    }
+
+    fn publish_record(
+        &mut self,
+        record: Record,
+        quorum: Quorum,
+        context: PutRecordContext,
+    ) -> Result<QueryId, ()> {
+        let target = record.key;
+        let peers = self.routing_table.closest_nodes(&target);
+
+        let query_info = QueryInfo::PutRecord {
+            record,
+            step: PutRecordStep::FindNodes,
+            context,
             quorum: quorum.into(),
         };
         Ok(self.queries.add_query(target, peers, query_info))
@@ -662,7 +678,7 @@ impl KademliaNode {
                     } else {
                         PutRecordContext::Replicate
                     };
-                    // self.publish_record(record, Quorum::All, context)
+                    let _ = self.publish_record(record, Quorum::All, put_context);
                 } else {
                     break;
                 }
@@ -670,6 +686,7 @@ impl KademliaNode {
 
             self.republish_job = Some(job);
         }
+
         loop {
             // first get all the queued events from previous iterations
             if let Some(ev) = self.queued_events.pop_front() {
