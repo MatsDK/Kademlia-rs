@@ -7,7 +7,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::key::Key;
+use crate::{key::Key, MAX_RECORDS, MAX_RECORD_SIZE};
 
 #[derive(Debug)]
 #[allow(unused)]
@@ -15,6 +15,15 @@ pub struct RecordStore {
     local_key: Key,
     records: HashMap<Key, Record>,
     providers: HashMap<Key, Vec<Key>>,
+}
+
+#[derive(thiserror::Error, Debug, Clone)]
+pub enum StoreError {
+    #[error("This store has reached its maximum amount of records")]
+    MaxRecords,
+
+    #[error("The value of this record is too large to be stored")]
+    ValueTooLarge,
 }
 
 impl RecordStore {
@@ -30,15 +39,20 @@ impl RecordStore {
         self.records.get(key).map(Cow::Borrowed)
     }
 
-    pub fn put(&mut self, record: Record) -> Result<(), ()> {
+    pub fn put(&mut self, record: Record) -> Result<(), StoreError> {
+        if record.value.len() >= MAX_RECORD_SIZE {
+            return Err(StoreError::ValueTooLarge);
+        }
+
+        let num_records = self.records.len();
         match self.records.entry(record.key.clone()) {
             Entry::Occupied(mut e) => {
                 e.insert(record);
             }
             Entry::Vacant(e) => {
-                // if num_records >= self.config.max_records {
-                //     return Err(Error::MaxRecords);
-                // }
+                if num_records >= MAX_RECORDS {
+                    return Err(StoreError::MaxRecords);
+                }
                 e.insert(record);
             }
         }

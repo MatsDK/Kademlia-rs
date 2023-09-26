@@ -385,7 +385,7 @@ fn execute_node(
                 ev = node.select_next_some() => {
                     match ev {
                         OutEvent::ConnectionEstablished(_peer_id) => trigger_routing_table_update(&node, app_handle.clone()),
-                        OutEvent::ConnectionClosed(_peer_id) => trigger_routing_table_update(&node, app_handle.clone()),
+                        OutEvent::ConnectionClosed { .. } => trigger_routing_table_update(&node, app_handle.clone()),
                         OutEvent::StoreChanged(_change) => trigger_store_change_update(&node, app_handle.clone()),
                         OutEvent::OutBoundQueryProgressed { result, .. } => {
                             match result {

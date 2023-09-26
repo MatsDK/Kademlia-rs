@@ -1,11 +1,13 @@
 # Kademlia-rs
-Kademlia implementation in rust with a Tauri testing interface.
+[Kademlia](https://en.wikipedia.org/wiki/Kademlia) implementation in rust with a Tauri testing interface.
+
 ![image](https://github.com/MatsDK/Kademlia-rs/assets/67562518/d72a40f9-dce1-40b8-a964-e8779cde92d4)
 
 **TODO**
 - [x] Record expiration
-- [ ] Replicate records on interval
-- [ ] Republish records on interval
+- [x] Replicate records on interval
+- [x] Republish records on interval
+- [ ] Skip received records in next iteration of re-publishing
 
 References: 
 - https://github.com/libp2p/rust-libp2p

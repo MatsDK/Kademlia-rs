@@ -115,9 +115,10 @@ async fn main() -> io::Result<()> {
                     OutEvent::ConnectionEstablished(peer_id) => {
                         println!("> Connection established: {}", peer_id);
                     }
-                    OutEvent::ConnectionClosed(peer_id) => {
-                        println!("> Connection closed: {}", peer_id);
+                    OutEvent::ConnectionClosed { peer, reason, .. } => {
+                        println!("> Connection closed: {}, reason: {:?}", peer, reason);
                     }
+                    #[cfg(feature = "debug")]
                     OutEvent::StoreChanged(change) => match change {
                         StoreChangedEvent::PutRecord { record } => {
                             println!("> Successfully stored record locally: {record:?}");

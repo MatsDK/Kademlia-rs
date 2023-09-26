@@ -445,6 +445,7 @@ async fn established_connection(
     }
 }
 
+// TODO: add separate error for inbound and outbound with custom errors
 #[derive(Debug)]
 pub enum PendingConnectionEvent {
     ConnectionEstablished {

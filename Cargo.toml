@@ -24,3 +24,4 @@ clap = { version = "4.0.32", features = ["derive"] }
 arrayvec = "0.7.2"
 libc = "0.2.139"
 serde_millis = "0.1.1"
+thiserror = "1.0.48"

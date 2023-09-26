@@ -1,6 +1,7 @@
 use futures::{stream::FusedStream, Stream};
 use multiaddr::Multiaddr;
 use serde::{Deserialize, Serialize};
+use socket2::SockAddr;
 #[allow(unused)]
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -11,6 +12,7 @@ use std::{
 };
 use std::{
     fmt,
+    net::SocketAddr,
     time::{Duration, Instant},
 };
 
@@ -23,7 +25,7 @@ use crate::{
     },
     republish::RepublishJob,
     routing::{Node, NodeStatus, RoutingTable, UpdateResult},
-    store::{Record, RecordStore},
+    store::{Record, RecordStore, StoreError},
     transport::{socketaddr_to_multiaddr, Transport, TransportEvent},
     JOB_MAX_NEW_QUERIES, K_VALUE, MAX_QUERIES,
 };
@@ -190,16 +192,19 @@ impl KademliaNode {
         }
     }
 
-    pub fn put_record(&mut self, mut record: Record, quorum: Quorum) -> Result<QueryId, ()> {
+    pub fn put_record(
+        &mut self,
+        mut record: Record,
+        quorum: Quorum,
+    ) -> Result<QueryId, StoreError> {
         record.set_publisher(*self.local_key());
-        // TODO: errors for store with `thiserror`
-        self.store.put(record.clone()).unwrap();
+        self.store.put(record.clone())?;
 
         record.expires = record
             .expires
             .or_else(|| self.config.record_ttl.map(|ttl| Instant::now() + ttl));
 
-        // TODO: make debug feature only
+        #[cfg(feature = "debug")]
         self.queued_events
             .push_back(NodeEvent::GenerateEvent(OutEvent::StoreChanged(
                 StoreChangedEvent::PutRecord {
@@ -285,6 +290,7 @@ impl KademliaNode {
             if record.publisher.as_ref() == Some(self.local_key()) {
                 self.store.remove(key);
 
+                #[cfg(feature = "debug")]
                 self.queued_events
                     .push_back(NodeEvent::GenerateEvent(OutEvent::StoreChanged(
                         StoreChangedEvent::RemoveRecord {
@@ -362,15 +368,14 @@ impl KademliaNode {
 
         if !record.is_expired(now) {
             match self.store.put(record.clone()) {
-                Ok(()) => {
-                    // TODO: only with debug feature
+                Ok(_) => {
+                    #[cfg(feature = "debug")]
                     self.queued_events
                         .push_back(NodeEvent::GenerateEvent(OutEvent::StoreChanged(
                             StoreChangedEvent::PutRecord { record },
                         )));
                 }
-                // TODO: error handling
-                Err(()) => {}
+                Err(_e) => return,
             }
         }
 
@@ -539,11 +544,11 @@ impl KademliaNode {
                 self.connected_peers.remove(&key);
                 self.update_node_status(key, None, NodeStatus::Disconnected);
 
-                if let Some(e) = error {
-                    eprintln!("Connection with {remote_addr} closed with message: {}", e);
-                }
-                // TODO: handle disconnect reason
-                let out_ev = OutEvent::ConnectionClosed(key);
+                let out_ev = OutEvent::ConnectionClosed {
+                    peer: key,
+                    reason: error,
+                    remote_addr,
+                };
                 return Some(NodeEvent::GenerateEvent(out_ev));
             }
             PoolEvent::ConnectionFailed { error, remote_addr } => {
@@ -860,9 +865,17 @@ pub enum NodeEvent {
 
 #[derive(Debug, Clone)]
 pub enum OutEvent {
-    OutBoundQueryProgressed { id: QueryId, result: QueryResult },
+    OutBoundQueryProgressed {
+        id: QueryId,
+        result: QueryResult,
+    },
     ConnectionEstablished(Key),
-    ConnectionClosed(Key),
+    ConnectionClosed {
+        peer: Key,
+        remote_addr: SocketAddr,
+        reason: Option<String>,
+    },
+    #[cfg(feature = "debug")]
     StoreChanged(StoreChangedEvent),
     Other,
 }
