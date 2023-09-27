@@ -35,6 +35,7 @@ impl EstablishedConnection {
 struct PendingConnection {
     peer_id: Option<Key>,
     abort_sender: Option<oneshot::Sender<()>>,
+    remote_addr: SocketAddr,
 }
 
 impl PendingConnection {
@@ -87,7 +88,6 @@ impl Pool {
             conn_id,
             abort_receiver,
             stream,
-            remote_addr,
             self.pending_connections_tx.clone(),
             self.local_key.clone(),
         ));
@@ -97,12 +97,13 @@ impl Pool {
             PendingConnection {
                 peer_id: None,
                 abort_sender: Some(abort_sender),
+                remote_addr,
             },
         );
     }
 
     pub fn add_outgoing(&mut self, dial: Dial, remote_addr: Multiaddr) {
-        let socket_addr = multiaddr_to_socketaddr(remote_addr).unwrap();
+        let remote_addr = multiaddr_to_socketaddr(remote_addr).unwrap();
         let conn_id = self.next_conn_id();
         let (abort_sender, abort_receiver) = oneshot::channel();
 
@@ -110,7 +111,6 @@ impl Pool {
             dial,
             conn_id,
             abort_receiver,
-            socket_addr,
             self.pending_connections_tx.clone(),
             self.local_key.clone(),
         ));
@@ -120,6 +120,7 @@ impl Pool {
             PendingConnection {
                 peer_id: None,
                 abort_sender: Some(abort_sender),
+                remote_addr,
             },
         );
     }
@@ -180,9 +181,14 @@ impl Pool {
             match event {
                 PendingConnectionEvent::ConnectionEstablished {
                     key,
-                    remote_addr,
+                    conn_id,
                     stream,
                 } => {
+                    let PendingConnection { remote_addr, .. } = self
+                        .pending_connections
+                        .remove(&conn_id)
+                        .expect("Not a pending connection");
+
                     let (command_sender, command_receiver) = mpsc::channel(32);
                     let connection = Connection {
                         remote_addr,
@@ -206,9 +212,14 @@ impl Pool {
 
                     return Poll::Ready(PoolEvent::NewConnection { key, remote_addr });
                 }
-                PendingConnectionEvent::ConnectionFailed {
-                    error, remote_addr, ..
-                } => return Poll::Ready(PoolEvent::ConnectionFailed { error, remote_addr }),
+                PendingConnectionEvent::PendingFailed { conn_id, error, .. } => {
+                    let PendingConnection { remote_addr, .. } = self
+                        .pending_connections
+                        .remove(&conn_id)
+                        .expect("Not a pending connection");
+
+                    return Poll::Ready(PoolEvent::PendingConnectionFailed { error, remote_addr });
+                }
             };
         }
 
@@ -263,7 +274,6 @@ async fn pending_outgoing(
     dial: Dial,
     conn_id: usize,
     abort_receiver: oneshot::Receiver<()>,
-    remote_addr: SocketAddr,
     mut event_sender: mpsc::Sender<PendingConnectionEvent>,
     local_key: Key,
 ) {
@@ -272,8 +282,7 @@ async fn pending_outgoing(
             match abort {
                 Err(..) => {
                     event_sender
-                        .send(PendingConnectionEvent::ConnectionFailed {
-                            remote_addr,
+                        .send(PendingConnectionEvent::PendingFailed  {
                             error: io::Error::new(io::ErrorKind::Other, format!("Connection aborted")),
                             conn_id
                         }).await.unwrap();
@@ -285,13 +294,12 @@ async fn pending_outgoing(
             let mut stream = match stream{
                 Err(error) => {
                     return event_sender
-                        .send(PendingConnectionEvent::ConnectionFailed {
+                        .send(PendingConnectionEvent::PendingFailed {
                             conn_id,
                             error: io::Error::new(
                                 io::ErrorKind::Other,
                                 format!("Failed to establish connetion: {error}"),
                             ),
-                            remote_addr,
                         })
                         .await
                         .unwrap();
@@ -307,8 +315,8 @@ async fn pending_outgoing(
                     if let KademliaEvent::Ping { target } = ev {
                         event_sender
                             .send(PendingConnectionEvent::ConnectionEstablished {
+                                conn_id,
                                 key: target,
-                                remote_addr,
                                 stream,
                             })
                             .await
@@ -317,13 +325,12 @@ async fn pending_outgoing(
                 }
                 Poll::Ready(Err(error)) => {
                     event_sender
-                        .send(PendingConnectionEvent::ConnectionFailed {
+                        .send(PendingConnectionEvent::PendingFailed {
                             conn_id,
                             error: io::Error::new(
                                 io::ErrorKind::Other,
                                 format!("Failed to establish connetion: {error}"),
                             ),
-                            remote_addr,
                         })
                         .await
                         .unwrap();
@@ -338,7 +345,6 @@ async fn pending_incoming(
     conn_id: usize,
     abort_receiver: oneshot::Receiver<()>,
     mut stream: TcpStream,
-    remote_addr: SocketAddr,
     mut event_sender: mpsc::Sender<PendingConnectionEvent>,
     local_key: Key,
 ) {
@@ -347,8 +353,7 @@ async fn pending_incoming(
             match abort {
                 Err(..) => {
                     event_sender
-                        .send(PendingConnectionEvent::ConnectionFailed {
-                            remote_addr,
+                        .send(PendingConnectionEvent::PendingFailed {
                             error: io::Error::new(io::ErrorKind::Other, format!("Connection aborted")),
                             conn_id
                         }).await.unwrap();
@@ -365,8 +370,8 @@ async fn pending_incoming(
 
                         event_sender
                             .send(PendingConnectionEvent::ConnectionEstablished {
+                                conn_id,
                                 key: target,
-                                remote_addr,
                                 stream,
                             })
                             .await
@@ -377,13 +382,12 @@ async fn pending_incoming(
                 }
                 Poll::Ready(Err(error)) => {
                     event_sender
-                        .send(PendingConnectionEvent::ConnectionFailed {
+                        .send(PendingConnectionEvent::PendingFailed {
                             conn_id,
                             error: io::Error::new(
                                 io::ErrorKind::Other,
                                 format!("Failed to establish connection: {error}"),
                             ),
-                            remote_addr,
                         })
                         .await
                         .unwrap();
@@ -445,17 +449,15 @@ async fn established_connection(
     }
 }
 
-// TODO: add separate error for inbound and outbound with custom errors
 #[derive(Debug)]
 pub enum PendingConnectionEvent {
     ConnectionEstablished {
         key: Key,
-        remote_addr: SocketAddr,
+        conn_id: usize,
         stream: TcpStream,
     },
-    ConnectionFailed {
+    PendingFailed {
         conn_id: usize,
-        remote_addr: SocketAddr,
         error: io::Error,
     },
 }
@@ -481,7 +483,7 @@ pub enum PoolEvent {
         error: Option<String>,
         remote_addr: SocketAddr,
     },
-    ConnectionFailed {
+    PendingConnectionFailed {
         error: io::Error,
         remote_addr: SocketAddr,
     },

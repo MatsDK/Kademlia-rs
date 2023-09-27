@@ -7,7 +7,7 @@
 - [x] Record expiration
 - [x] Replicate records on interval
 - [x] Republish records on interval
-- [ ] Skip received records in next iteration of re-publishing
+- [x] Skip received records in next iteration of re-publishing
 
 References: 
 - https://github.com/libp2p/rust-libp2p

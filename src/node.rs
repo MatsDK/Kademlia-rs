@@ -1,7 +1,7 @@
 use futures::{stream::FusedStream, Stream};
 use multiaddr::Multiaddr;
 use serde::{Deserialize, Serialize};
-use socket2::SockAddr;
+
 #[allow(unused)]
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -366,6 +366,12 @@ impl KademliaNode {
         // The record is stored forever if the local TTL and the records expiration is `None`.
         record.expires = record.expires.or(expiration).min(expiration);
 
+        // Skip this record in the next run of the replicate/republish cycle,
+        // since we can assume the sender replicated to the k closest nodes.
+        if let Some(job) = self.republish_job.as_mut() {
+            job.skip(record.key);
+        }
+
         if !record.is_expired(now) {
             match self.store.put(record.clone()) {
                 Ok(_) => {
@@ -551,8 +557,12 @@ impl KademliaNode {
                 };
                 return Some(NodeEvent::GenerateEvent(out_ev));
             }
-            PoolEvent::ConnectionFailed { error, remote_addr } => {
-                eprintln!("Connection with {remote_addr} failed: {error}");
+            PoolEvent::PendingConnectionFailed { error, remote_addr } => {
+                let out_ev = OutEvent::ConnectionFailed {
+                    remote_addr,
+                    error: error.to_string(),
+                };
+                return Some(NodeEvent::GenerateEvent(out_ev));
             }
         }
         None
@@ -874,6 +884,10 @@ pub enum OutEvent {
         peer: Key,
         remote_addr: SocketAddr,
         reason: Option<String>,
+    },
+    ConnectionFailed {
+        remote_addr: SocketAddr,
+        error: String,
     },
     #[cfg(feature = "debug")]
     StoreChanged(StoreChangedEvent),

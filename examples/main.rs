@@ -8,9 +8,11 @@ use std::str::FromStr;
 use tokio::io::{stdin, AsyncBufReadExt, BufReader};
 
 use kademlia_rs::key::Key;
+#[cfg(feature = "debug")]
+use kademlia_rs::node::StoreChangedEvent;
 use kademlia_rs::node::{
     FoundRecord, GetRecordResult, KademliaConfig, KademliaNode, OutEvent, PutRecordError,
-    PutRecordOk, QueryResult, StoreChangedEvent,
+    PutRecordOk, QueryResult,
 };
 use kademlia_rs::query::Quorum;
 use kademlia_rs::store::Record;
@@ -117,6 +119,9 @@ async fn main() -> io::Result<()> {
                     }
                     OutEvent::ConnectionClosed { peer, reason, .. } => {
                         println!("> Connection closed: {}, reason: {:?}", peer, reason);
+                    }
+                    OutEvent::ConnectionFailed { error, remote_addr } => {
+                        println!("> Connection failed: {}, reason: {}", remote_addr, error);
                     }
                     #[cfg(feature = "debug")]
                     OutEvent::StoreChanged(change) => match change {

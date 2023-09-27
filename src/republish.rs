@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     task::{Context, Poll},
     time::{Duration, Instant},
     vec,
@@ -17,6 +18,7 @@ pub struct RepublishJob {
     replication_interval: Duration,
     next_publish: Option<Instant>,
     state: JobState,
+    skipped: HashSet<Key>,
 }
 
 #[derive(Debug)]
@@ -42,7 +44,13 @@ impl RepublishJob {
             replication_interval,
             next_publish,
             state: JobState::Waiting(now + replication_interval),
+            skipped: HashSet::new(),
         }
+    }
+
+    // Add to the list of records to skip in the next cycle.
+    pub fn skip(&mut self, key: Key) {
+        self.skipped.insert(key);
     }
 
     pub fn poll(
@@ -64,7 +72,7 @@ impl RepublishJob {
                         let is_publisher = record.publisher == Some(self.local_key);
 
                         // The original publisher of a record is not responible for re-publising
-                        if is_publisher && !should_publish {
+                        if (is_publisher && !should_publish) || self.skipped.contains(&record.key) {
                             None
                         } else {
                             let mut record = record.clone();
@@ -84,6 +92,7 @@ impl RepublishJob {
                     self.next_publish = self.republish_interval.map(|i| now + i);
                 }
 
+                self.skipped.clear();
                 self.state = JobState::Running(records);
             }
         }
