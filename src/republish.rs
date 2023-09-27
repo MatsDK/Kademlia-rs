@@ -59,11 +59,9 @@ impl RepublishJob {
         store: &mut RecordStore,
         now: Instant,
     ) -> Poll<Record> {
-        // println!("Poll replicate job");
         if let JobState::Waiting(deadline) = self.state {
             if now >= deadline {
                 let should_publish = self.next_publish.map_or(false, |i| now >= i);
-                // println!("Run replicate cycle, should publish this cycle: {should_publish}");
 
                 let records = store
                     .all_records()
@@ -98,7 +96,6 @@ impl RepublishJob {
         }
 
         if let JobState::Running(records) = &mut self.state {
-            // println!("Running the replication/republishing, records: {records:?}");
             for record in records {
                 if record.is_expired(now) {
                     store.remove(&record.key)
@@ -106,8 +103,6 @@ impl RepublishJob {
                     return Poll::Ready(record);
                 }
             }
-
-            // println!("done running");
 
             // After all records are republished/replicated, reset the state to waiting.
             let next_deadline = now + self.replication_interval;
