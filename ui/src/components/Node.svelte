@@ -2,6 +2,7 @@
     import type { NodeInfo } from "../lib/bindings";
     import { taurpc } from "../lib/ipc";
     import { nodes } from "../lib/store";
+    import Record from "./Record.svelte";
     import RoutingTable from "./RoutingTable.svelte";
 
     export let node: NodeInfo;
@@ -23,7 +24,7 @@
 
         try {
             await taurpc.get_record(node.key, key.trim());
-            tab = "Records";
+            // tab = "Records";
             key = "";
         } catch (error) {
             console.error(error);
@@ -38,14 +39,6 @@
             tab = "Records";
             key = "";
             value = "";
-        } catch (error) {
-            console.error(error);
-        }
-    };
-
-    const removeRecord = async (record_key: string) => {
-        try {
-            await taurpc.remove_record(node.key, record_key);
         } catch (error) {
             console.error(error);
         }
@@ -99,40 +92,18 @@
         </div>
         {#if tab === "Records"}
             <div class="px-2 my-1 grid grid-cols-2 overflow-hidden gap-1">
-                {#each node.records ?? [] as [key, publisher, value]}
-                    {@const is_publisher = publisher == node.key}
-                    <div
-                        class="group border rounded-sm border-secondary px-2 overflow-hidden text-sm"
-                    >
-                        <div class="max-w-full truncate font-semibold">
-                            {key}
-                        </div>
-                        <pre
-                            class="truncate max-w-full text-secondary-text-lighter">
-
-                            {value}
-                    </pre>
-                        {#if is_publisher}
-                            <div
-                                class="flex justify-end gap-1 items-center pb-px"
-                            >
-                                <button
-                                    class="opacity-0 group-hover:opacity-60 transition-opacity text-xs"
-                                    on:click={() => removeRecord(key)}
-                                    >Remove</button
-                                >
-                                <span
-                                    class="bg-gray-300 text-black text-xs px-1 rounded-md font-semibold h-[16px]"
-                                    >Publisher</span
-                                >
-                            </div>
-                        {/if}
-                    </div>
+                {#each node.records ?? [] as [record_key, publisher, value]}
+                    <Record
+                        {publisher}
+                        {record_key}
+                        {value}
+                        node_key={node.key}
+                    />
                 {/each}
             </div>
         {:else if tab === "Get"}
             <div
-                class="w-full flex-1 flex flex-col justify-center items-center h-full"
+                class="w-full flex-1 flex flex-col justify-center items-center h-full gap-5"
             >
                 <form
                     class="flex flex-col min-w-[250px] gap-2"
@@ -153,6 +124,16 @@
                         >Get record</button
                     >
                 </form>
+
+                {#if node.last_get_res}
+                    {@const [record_key, publisher, value] = node.last_get_res}
+                    <Record
+                        {record_key}
+                        {publisher}
+                        {value}
+                        node_key={node.key}
+                    />
+                {/if}
             </div>
         {:else if tab === "Put"}
             <div

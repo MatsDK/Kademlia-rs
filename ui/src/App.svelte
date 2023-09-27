@@ -35,6 +35,15 @@
                 }
             })
         );
+        unlisten.push(
+            taurpc.get_record_finished.on((node_key, record) => {
+                let node = $nodes.find(({ key }) => key === node_key);
+                if (node) {
+                    node.last_get_res = record;
+                    nodes.set($nodes);
+                }
+            })
+        );
 
         return unlisten;
     });
