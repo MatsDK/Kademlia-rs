@@ -318,7 +318,7 @@ impl Query {
 #[allow(unused)]
 enum PeersIterState {
     Finished,
-    Iterating,
+    Iterating { no_progress: usize },
     Stalled,
 }
 
@@ -345,8 +345,9 @@ impl PeersIter {
                 },
             )
         }));
+
         Self {
-            state: PeersIterState::Iterating,
+            state: PeersIterState::Iterating { no_progress: 0 },
             target,
             closest_peers,
             num_waiting: 0,
@@ -357,6 +358,17 @@ impl PeersIter {
 
     pub fn finish(&mut self) {
         self.state = PeersIterState::Finished;
+    }
+
+    /// Checks if the iterator is at parallelism capacity.
+    fn max_parallelism_reached(&self) -> bool {
+        match self.state {
+            PeersIterState::Stalled => {
+                self.num_waiting >= usize::max(self.num_results, ALPHA_VALUE)
+            }
+            PeersIterState::Iterating { .. } => self.num_waiting >= ALPHA_VALUE,
+            PeersIterState::Finished => true,
+        }
     }
 
     pub fn get_peers(self) -> Vec<Node> {
@@ -394,6 +406,9 @@ impl PeersIter {
             },
         }
 
+        let num_closest = self.closest_peers.len();
+        let mut made_progress = false;
+
         // Add `closer_peers` to the iterator
         for node in closer_peers.into_iter() {
             let key = node.key;
@@ -404,15 +419,31 @@ impl PeersIter {
                 node,
             };
 
+            made_progress = self.closest_peers.keys().next() == Some(&distance)
+                || num_closest < self.num_results;
+
             self.closest_peers.entry(distance).or_insert(new_peer);
         }
 
-        // TODO: Set new iterator state, check if iteration stalled based on
-        // the `ALPHA_VALUE` (Parallelism) and if the iterator made progres
-        // self.state = match self.state {
-        //     PeersIterState::Iterating {
-        //     }
-        // }
+        // Update the state, check if the iterator stalled.
+        self.state = match self.state {
+            PeersIterState::Stalled => {
+                if made_progress {
+                    PeersIterState::Iterating { no_progress: 0 }
+                } else {
+                    PeersIterState::Stalled
+                }
+            }
+            PeersIterState::Iterating { no_progress } => {
+                let no_progress = if made_progress { 0 } else { no_progress + 1 };
+                if no_progress >= ALPHA_VALUE {
+                    PeersIterState::Stalled
+                } else {
+                    PeersIterState::Iterating { no_progress }
+                }
+            }
+            PeersIterState::Finished => PeersIterState::Finished,
+        };
     }
 
     fn on_failure(&mut self, peer: &Key) {
@@ -442,10 +473,13 @@ impl PeersIter {
 
         let mut result_counter = 0;
 
+        // Check if the iterator is at its parallelism capacity.
+        let at_capacity = self.max_parallelism_reached();
+
         for peer in self.closest_peers.values_mut() {
             match peer.state {
                 PeerState::NotContacted => {
-                    if self.num_waiting >= ALPHA_VALUE {
+                    if at_capacity {
                         return QueryState::WaitingAtCapacity;
                     }
 
@@ -458,7 +492,7 @@ impl PeersIter {
                     if now >= timeout {
                         self.num_waiting -= 1;
                         peer.state = PeerState::Unresponsive
-                    } else if self.num_waiting >= ALPHA_VALUE {
+                    } else if at_capacity {
                         return QueryState::WaitingAtCapacity;
                     }
                 }

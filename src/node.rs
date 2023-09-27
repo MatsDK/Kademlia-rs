@@ -1,6 +1,8 @@
 use futures::{stream::FusedStream, Stream};
 use multiaddr::Multiaddr;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "debug")]
+use std::borrow::Cow;
 
 #[allow(unused)]
 use std::{
@@ -816,7 +818,7 @@ impl KademliaNode {
 
     #[cfg(feature = "debug")]
     // Return locally stored records
-    pub fn get_record_store(&self) -> Vec<&Record> {
+    pub fn get_record_store(&self) -> Vec<Cow<Record>> {
         self.store.all_records()
     }
 }

@@ -10,7 +10,7 @@ export type RoutingTableChanged = { node_key: string; buckets: { [key: number]: 
 
 export type NodeInfo = { key: string; addr: string; is_bootstrap: boolean; buckets: { [key: number]: ([string, string, string])[] }; records: ([string, string, string])[] }
 
-const ARGS_MAP = {"":"{\"close_node\":[\"node_id\"],\"bootstrap_nodes_changed\":[\"bootstrap_nodes\"],\"disconnect_peer\":[\"node_id\",\"connect_peer_id\"],\"record_store_changed\":[\"records\"],\"put_record\":[\"node_key\",\"record_key\",\"value\"],\"remove_record\":[\"node_key\",\"record_key\"],\"new_node\":[],\"add_bootstrap_node\":[\"key\"],\"get_record\":[\"node_key\",\"record_key\"],\"remove_bootstrap_node\":[\"key\"],\"routing_table_changed\":[\"routing_table\"]}"}
+const ARGS_MAP = {"":"{\"close_node\":[\"node_id\"],\"get_record\":[\"node_key\",\"record_key\"],\"record_store_changed\":[\"records\"],\"put_record\":[\"node_key\",\"record_key\",\"value\"],\"routing_table_changed\":[\"routing_table\"],\"add_bootstrap_node\":[\"key\"],\"remove_record\":[\"node_key\",\"record_key\"],\"disconnect_peer\":[\"node_id\",\"connect_peer_id\"],\"new_node\":[],\"remove_bootstrap_node\":[\"key\"],\"bootstrap_nodes_changed\":[\"bootstrap_nodes\"]}"}
 import { createTauRPCProxy as createProxy } from "taurpc"
 
 export const createTauRPCProxy = () => createProxy<Router>(ARGS_MAP)

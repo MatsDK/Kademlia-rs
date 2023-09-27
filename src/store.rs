@@ -64,12 +64,8 @@ impl RecordStore {
         self.records.remove(key);
     }
 
-    // TODO: return Cow::borrowed
-    pub fn all_records(&self) -> Vec<&Record> {
-        self.records
-            .iter()
-            .map(|(_, record)| record)
-            .collect::<Vec<_>>()
+    pub fn all_records(&self) -> Vec<Cow<Record>> {
+        self.records.values().map(Cow::Borrowed).collect()
     }
 }
 

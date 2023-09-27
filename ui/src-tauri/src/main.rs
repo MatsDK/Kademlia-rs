@@ -315,22 +315,21 @@ fn trigger_routing_table_update(node: &KademliaNode, app_handle: AppHandle) {
 fn trigger_store_change_update(node: &KademliaNode, app_handle: AppHandle) {
     let records = node.get_record_store();
     let records = records
-        .iter()
-        .map(
-            |Record {
-                 key,
-                 value,
-                 publisher,
-                 ..
-             }| {
-                let publisher = publisher.map(|v| v.to_string()).unwrap_or_default();
-                let value = match String::from_utf8(value.clone()) {
-                    Ok(v) => v,
-                    Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
-                };
-                (key.to_string(), publisher, value)
-            },
-        )
+        .into_iter()
+        .map(|r| {
+            let Record {
+                publisher,
+                value,
+                key,
+                ..
+            } = r.into_owned();
+            let publisher = publisher.map(|v| v.to_string()).unwrap_or_default();
+            let value = match String::from_utf8(value.clone()) {
+                Ok(v) => v,
+                Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
+            };
+            (key.to_string(), publisher, value)
+        })
         .collect();
 
     let event = RecordStoreChanged {

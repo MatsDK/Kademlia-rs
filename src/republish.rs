@@ -67,21 +67,21 @@ impl RepublishJob {
 
                 let records = store
                     .all_records()
-                    .iter()
-                    .filter_map(|&record| {
+                    .into_iter()
+                    .filter_map(|record| {
                         let is_publisher = record.publisher == Some(self.local_key);
 
                         // The original publisher of a record is not responible for re-publising
                         if (is_publisher && !should_publish) || self.skipped.contains(&record.key) {
                             None
                         } else {
-                            let mut record = record.clone();
+                            let mut record = record.into_owned();
                             if should_publish && is_publisher {
                                 record.expires = record
                                     .expires
                                     .or_else(|| self.record_ttl.map(|ttl| now + ttl));
                             }
-                            Some(record.clone())
+                            Some(record)
                         }
                     })
                     .collect::<Vec<_>>()
