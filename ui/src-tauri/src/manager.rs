@@ -22,6 +22,7 @@ pub enum KadEvent {
     PutRecord { record: Record },
     RemoveRecord { key: Key },
     DisconnectPeer { key: Key },
+    Bootstrap { nodes: Vec<(Key, Multiaddr)> },
     CloseNode,
 }
 
@@ -95,6 +96,15 @@ impl Manager {
         self.trigger_bootstrap_node_update(app_handle);
     }
 
+    pub fn run_bootstrap(&mut self, key: Key) {
+        let Some((_, node_sender)) = self.nodes.get(&key) else {
+            return
+        };
+
+        let nodes = self.bootstrap_nodes.clone();
+        node_sender.send(KadEvent::Bootstrap { nodes }).unwrap();
+    }
+
     pub fn trigger_bootstrap_node_update(&self, app_handle: AppHandle) {
         let event_trigger = ApiEventTrigger::new(app_handle);
         event_trigger
@@ -108,9 +118,8 @@ impl Manager {
     }
 
     pub fn disconnect_peer(&self, node_key: Key, connect_peer: Key) {
-        let node_sender = match self.nodes.get(&node_key) {
-            Some((_, sender)) => sender,
-            None => return,
+        let Some((_, node_sender)) = self.nodes.get(&node_key) else {
+            return
         };
 
         node_sender
@@ -120,18 +129,16 @@ impl Manager {
 
     pub fn get_record(&mut self, node_key: Key, record_key: String) {
         let key = Key::from_str(&record_key).unwrap();
-        let node_sender = match self.nodes.get(&node_key) {
-            Some((_, sender)) => sender,
-            None => return,
+        let Some((_, node_sender)) = self.nodes.get(&node_key) else {
+            return
         };
 
         node_sender.send(KadEvent::GetRecord { key }).unwrap();
     }
 
     pub fn put_record(&mut self, node_key: Key, record_key: Option<String>, value: String) {
-        let node_sender = match self.nodes.get(&node_key) {
-            Some((_, sender)) => sender,
-            None => return,
+        let Some((_, node_sender)) = self.nodes.get(&node_key) else {
+            return
         };
 
         let key = match record_key {
@@ -148,10 +155,10 @@ impl Manager {
 
     pub fn remove_record(&mut self, node_key: Key, record_key: String) {
         let key = Key::from_str(&record_key).unwrap();
-        let node_sender = match self.nodes.get(&node_key) {
-            Some((_, sender)) => sender,
-            None => return,
+        let Some((_, node_sender)) = self.nodes.get(&node_key) else {
+            return
         };
+
         node_sender.send(KadEvent::RemoveRecord { key }).unwrap();
     }
 

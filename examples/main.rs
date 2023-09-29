@@ -25,7 +25,7 @@ struct Args {
     #[arg(short, long)]
     addr: Multiaddr,
 
-    /// Dial another peer by addr, None for bootstrapping peer
+    /// Dial another peer by addr, `None` for bootstrapping peer
     #[arg(short, long)]
     dial: Option<Multiaddr>,
 }

@@ -52,6 +52,14 @@
             console.error(error);
         }
     };
+
+    const runBootstrap = async () => {
+        try {
+            await taurpc.bootstrap(node.key);
+        } catch (error) {
+            console.error(error);
+        }
+    };
 </script>
 
 <div class="border border-secondary h-full flex flex-col">
@@ -83,6 +91,10 @@
                         on:click={() => (tab = label)}>{label}</button
                     >
                 {/each}
+                <button
+                    class=" hover:opacity-100 opacity-60 transition-opacity"
+                    on:click={runBootstrap}>Bootstrap</button
+                >
             </div>
             <button
                 on:click={stopNode}

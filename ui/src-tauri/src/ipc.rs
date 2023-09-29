@@ -43,6 +43,8 @@ pub trait Api {
 
     async fn remove_bootstrap_node(app_handle: AppHandle, key: String);
 
+    async fn bootstrap(node_key: String);
+
     async fn disconnect_peer(node_id: String, connect_peer_id: String);
 
     async fn close_node(app_handle: AppHandle, node_id: String) -> Result<(), ()>;
@@ -92,6 +94,13 @@ impl Api for ApiImpl {
         // TODO: return invalid key error
         let key = Key::from_str(&key).unwrap();
         manager.remove_bootstrap_node(key, app_handle);
+    }
+
+    async fn bootstrap(self, key: String) {
+        let mut manager = self.manager.lock().await;
+        // TODO: return invalid key error
+        let key = Key::from_str(&key).unwrap();
+        manager.run_bootstrap(key);
     }
 
     async fn disconnect_peer(self, node_id: String, connect_peer_id: String) {

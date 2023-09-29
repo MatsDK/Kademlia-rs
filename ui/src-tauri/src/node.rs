@@ -98,7 +98,7 @@ pub fn execute_node(
 
         if !is_bootstrap {
             // TODO: better error handling, return error event to client
-            node.bootstrap().unwrap();
+            let _ = node.bootstrap();
         }
 
         loop {
@@ -120,6 +120,12 @@ pub fn execute_node(
                         }
                         KadEvent::DisconnectPeer { key } => {
                             let _ = node.disconnect(key);
+                        }
+                        KadEvent::Bootstrap { nodes } => {
+                            for (key, addr) in nodes {
+                                node.add_address(&key, addr.clone());
+                            }
+                            let _  = node.bootstrap();
                         }
                         KadEvent::CloseNode => {
                             drop(node);

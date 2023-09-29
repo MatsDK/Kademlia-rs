@@ -2,11 +2,9 @@ use futures::{stream::FusedStream, Stream};
 use multiaddr::Multiaddr;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "debug")]
-use std::borrow::Cow;
-
-#[allow(unused)]
+use std::{borrow::Cow, collections::HashMap};
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashSet, VecDeque},
     io,
     num::NonZeroUsize,
     pin::Pin,
