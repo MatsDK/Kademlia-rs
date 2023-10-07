@@ -29,7 +29,7 @@ export type TauRpcApiOutputTypes =
   | { proc_name: "get_record_finished"; output_type: null };
 
 export type TauRpcApiInputTypes =
-  | { proc_name: "new_node"; input_type: null }
+  | { proc_name: "new_node"; input_type: [string | null, boolean] }
   | { proc_name: "add_bootstrap_node"; input_type: { __taurpc_type: string } }
   | { proc_name: "remove_bootstrap_node"; input_type: { __taurpc_type: string } }
   | { proc_name: "bootstrap"; input_type: { __taurpc_type: string } }
@@ -45,7 +45,7 @@ export type TauRpcApiInputTypes =
 
 const ARGS_MAP = {
   "":
-    "{\"disconnect_peer\":[\"node_id\",\"connect_peer_id\"],\"add_bootstrap_node\":[\"key\"],\"routing_table_changed\":[\"routing_table\"],\"close_node\":[\"node_id\"],\"record_store_changed\":[\"records\"],\"bootstrap\":[\"node_key\"],\"put_record\":[\"node_key\",\"record_key\",\"value\"],\"get_record_finished\":[\"node_key\",\"record\"],\"new_node\":[],\"remove_bootstrap_node\":[\"key\"],\"bootstrap_nodes_changed\":[\"bootstrap_nodes\"],\"get_record\":[\"node_key\",\"record_key\"],\"remove_record\":[\"node_key\",\"record_key\"]}",
+    "{\"remove_record\":[\"node_key\",\"record_key\"],\"routing_table_changed\":[\"routing_table\"],\"get_record_finished\":[\"node_key\",\"record\"],\"record_store_changed\":[\"records\"],\"get_record\":[\"node_key\",\"record_key\"],\"disconnect_peer\":[\"node_id\",\"connect_peer_id\"],\"put_record\":[\"node_key\",\"record_key\",\"value\"],\"close_node\":[\"node_id\"],\"add_bootstrap_node\":[\"key\"],\"bootstrap_nodes_changed\":[\"bootstrap_nodes\"],\"remove_bootstrap_node\":[\"key\"],\"bootstrap\":[\"node_key\"],\"new_node\":[\"key\",\"make_bootstrap\"]}",
 };
 import { createTauRPCProxy as createProxy } from "taurpc";
 

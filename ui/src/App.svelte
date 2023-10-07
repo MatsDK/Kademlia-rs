@@ -5,10 +5,20 @@
     import { nodes } from "./lib/store";
     import BootstrapNodes from "./components/BootstrapNodes.svelte";
     import { onMount } from "svelte";
+    import { cx } from "./components/Node.svelte";
 
-    const newNode = async () => {
+    let genRandomKey = true;
+    let keyInput = "";
+    let makeBootstrap = false;
+
+    const newNode = async (e: SubmitEvent) => {
+        e.preventDefault();
         try {
-            const res = await taurpc.new_node();
+            const res = await taurpc.new_node(
+                !genRandomKey ? keyInput.trim() : null,
+                makeBootstrap
+            );
+            keyInput = "";
             nodes.set([...$nodes, res]);
         } catch (e) {
             console.error("Error creating node", e);
@@ -62,7 +72,51 @@
             >
                 Kademlia-rs
             </div>
-            <button on:click={newNode}>Initialize new node</button>
+
+            <form class="m-2 border-b border-secondary" on:submit={newNode}>
+                <div class="flex gap-2">
+                    <input
+                        type="text"
+                        bind:value={keyInput}
+                        placeholder="Key"
+                        class={cx(
+                            "bg-primary border border-secondary rounded-md text-sm px-1 flex-1",
+                            genRandomKey && "opacity-30 pointer-events-none"
+                        )}
+                    />
+                    <div class="flex gap-1">
+                        <input
+                            type="checkbox"
+                            bind:checked={genRandomKey}
+                            id="random-key"
+                        />
+                        <label class="text-sm" for="random-key">Random</label>
+                    </div>
+                </div>
+                <div class="flex justify-between mt-2 mb-3">
+                    <div class="flex gap-1">
+                        <input
+                            type="checkbox"
+                            name="make_bootstrap"
+                            id="bootstrap"
+                            bind:checked={makeBootstrap}
+                        />
+                        <label
+                            class={cx(
+                                "text-secondary-text-lighter transition-colors text-sm",
+                                makeBootstrap && "text-white"
+                            )}
+                            for="bootstrap">Make bootstrap node</label
+                        >
+                    </div>
+
+                    <button
+                        type="submit"
+                        class="bg-gray-300 hover:bg-white text-black transition-colors rounded-md px-2"
+                        >Initialize new node</button
+                    >
+                </div>
+            </form>
         </div>
         <BootstrapNodes />
     </div>

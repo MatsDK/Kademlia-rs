@@ -40,10 +40,13 @@ async fn get_available_port() -> u16 {
 }
 
 impl Manager {
-    pub async fn init_node(&mut self, app_handle: AppHandle) -> Result<NodeInfo, ()> {
-        let is_bootstrap = self.nodes.len() == 0;
-
-        let key = Key::random();
+    pub async fn init_node(
+        &mut self,
+        app_handle: AppHandle,
+        key: Option<String>,
+        make_bootstrap: bool,
+    ) -> Result<NodeInfo, ()> {
+        let key = key.map_or(Key::random(), |s| Key::from_str(&s).unwrap());
         let addr = multiaddr!(Ip4([127, 0, 0, 1]), Tcp(get_available_port().await));
 
         let (tx, rx) = channel(32);
@@ -55,7 +58,7 @@ impl Manager {
         let mut node = KademliaNode::new(key, addr.clone(), config).await.unwrap();
         self.nodes.insert(key, (node.get_addr().clone(), tx));
 
-        if is_bootstrap {
+        if make_bootstrap {
             self.add_bootstrap_node(key, app_handle.clone());
         } else {
             for (key, addr) in self.bootstrap_nodes.iter() {
@@ -63,12 +66,12 @@ impl Manager {
             }
         }
 
-        execute_node(node, is_bootstrap, rx, app_handle);
+        execute_node(node, make_bootstrap, rx, app_handle);
 
         Ok(NodeInfo {
             key: key.to_string(),
             addr: addr.to_string(),
-            is_bootstrap,
+            is_bootstrap: make_bootstrap,
             ..Default::default()
         })
     }

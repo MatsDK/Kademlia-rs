@@ -37,7 +37,11 @@ pub struct RecordStoreChanged {
 
 #[taurpc::procedures(export_to = "../src/lib/bindings.ts", event_trigger = ApiEventTrigger)]
 pub trait Api {
-    async fn new_node(app_handle: AppHandle) -> Result<NodeInfo, ()>;
+    async fn new_node(
+        app_handle: AppHandle,
+        key: Option<String>,
+        make_bootstrap: bool,
+    ) -> Result<NodeInfo, ()>;
 
     async fn add_bootstrap_node(app_handle: AppHandle, key: String);
 
@@ -77,9 +81,14 @@ pub struct ApiImpl {
 
 #[taurpc::resolvers]
 impl Api for ApiImpl {
-    async fn new_node(self, app_handle: AppHandle) -> Result<NodeInfo, ()> {
+    async fn new_node(
+        self,
+        app_handle: AppHandle,
+        key: Option<String>,
+        make_bootstrap: bool,
+    ) -> Result<NodeInfo, ()> {
         let mut manager = self.manager.lock().await;
-        manager.init_node(app_handle).await
+        manager.init_node(app_handle, key, make_bootstrap).await
     }
 
     async fn add_bootstrap_node(self, app_handle: AppHandle, key: String) {

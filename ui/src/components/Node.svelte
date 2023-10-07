@@ -1,3 +1,9 @@
+<script lang="ts" context="module">
+    export function cx(...cns: (boolean | string | undefined)[]): string {
+        return cns.filter(Boolean).join(" ");
+    }
+</script>
+
 <script lang="ts">
     import type { NodeInfo } from "../lib/bindings";
     import { taurpc } from "../lib/ipc";
@@ -11,10 +17,6 @@
     type Tabs = (typeof tabs)[number];
 
     let tab: Tabs = "Records";
-
-    function cx(...cns: (boolean | string | undefined)[]): string {
-        return cns.filter(Boolean).join(" ");
-    }
 
     let key = "";
     let value = "";
